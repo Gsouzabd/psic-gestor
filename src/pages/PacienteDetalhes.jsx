@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import Layout from '../components/Layout'
+import DadosPessoaisTab from '../components/DadosPessoaisTab'
 import AnamneseTab from '../components/AnamneseTab'
 import ProntuarioTab from '../components/ProntuarioTab'
 import PagamentosTab from '../components/PagamentosTab'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, User, FileText, DollarSign } from 'lucide-react'
+import { ArrowLeft, User, FileText, DollarSign, Trash2, UserCircle } from 'lucide-react'
 
 export default function PacienteDetalhes() {
   const { id } = useParams()
@@ -13,7 +14,7 @@ export default function PacienteDetalhes() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [paciente, setPaciente] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'anamnese')
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'dados')
 
   useEffect(() => {
     fetchPaciente()
@@ -21,7 +22,7 @@ export default function PacienteDetalhes() {
 
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab && ['anamnese', 'prontuario', 'pagamentos'].includes(tab)) {
+    if (tab && ['dados', 'anamnese', 'prontuario', 'pagamentos'].includes(tab)) {
       setActiveTab(tab)
     }
   }, [searchParams])
@@ -49,7 +50,66 @@ export default function PacienteDetalhes() {
     setSearchParams({ tab })
   }
 
+  const handleDeletePaciente = async () => {
+    if (!paciente) return
+    
+    if (!confirm(`Tem certeza que deseja excluir o paciente "${paciente.nome_completo}"?\n\nEsta ação não pode ser desfeita e todos os dados relacionados (anamnese, prontuários e pagamentos) serão removidos.`)) {
+      return
+    }
+
+    try {
+      // Deletar prontuários e pagamentos relacionados
+      const { data: prontuarios } = await supabase
+        .from('prontuarios')
+        .select('id')
+        .eq('paciente_id', id)
+
+      if (prontuarios && prontuarios.length > 0) {
+        const prontuarioIds = prontuarios.map(p => p.id)
+        
+        // Deletar pagamentos relacionados aos prontuários
+        await supabase
+          .from('pagamentos')
+          .delete()
+          .in('prontuario_id', prontuarioIds)
+
+        // Deletar prontuários
+        await supabase
+          .from('prontuarios')
+          .delete()
+          .eq('paciente_id', id)
+      }
+
+      // Deletar pagamentos diretos (se houver)
+      await supabase
+        .from('pagamentos')
+        .delete()
+        .eq('paciente_id', id)
+
+      // Deletar anamnese
+      await supabase
+        .from('anamneses')
+        .delete()
+        .eq('paciente_id', id)
+
+      // Deletar paciente
+      const { error } = await supabase
+        .from('pacientes')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      // Navegar de volta para a lista de pacientes
+      navigate('/pacientes')
+    } catch (error) {
+      console.error('Erro ao deletar paciente:', error)
+      alert('Erro ao deletar paciente. Tente novamente.')
+    }
+  }
+
   const tabs = [
+    { id: 'dados', label: 'Dados Pessoais', icon: UserCircle },
     { id: 'anamnese', label: 'Anamnese', icon: User },
     { id: 'prontuario', label: 'Prontuário', icon: FileText },
     { id: 'pagamentos', label: 'Pagamentos', icon: DollarSign },
@@ -94,6 +154,14 @@ export default function PacienteDetalhes() {
               {paciente.profissao}
             </p>
           </div>
+          <button
+            onClick={handleDeletePaciente}
+            className="flex items-center gap-2 px-3 sm:px-4 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition border border-red-200 hover:border-red-300 text-sm sm:text-base"
+            title="Excluir paciente"
+          >
+            <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="hidden sm:inline">Excluir</span>
+          </button>
         </div>
 
         {/* Tabs */}
@@ -121,6 +189,7 @@ export default function PacienteDetalhes() {
           </div>
 
           <div className="p-4 sm:p-6">
+            {activeTab === 'dados' && <DadosPessoaisTab pacienteId={id} paciente={paciente} onUpdate={fetchPaciente} />}
             {activeTab === 'anamnese' && <AnamneseTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'prontuario' && <ProntuarioTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'pagamentos' && <PagamentosTab pacienteId={id} paciente={paciente} />}

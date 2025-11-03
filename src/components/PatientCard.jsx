@@ -1,14 +1,29 @@
 import { useNavigate } from 'react-router-dom'
-import { User, Phone, Mail, Calendar } from 'lucide-react'
+import { User, Phone, Mail, Calendar, Trash2 } from 'lucide-react'
 
-export default function PatientCard({ patient }) {
+export default function PatientCard({ patient, onDelete }) {
   const navigate = useNavigate()
+
+  const handleDeleteClick = (e) => {
+    e.stopPropagation() // Previne a navegação ao clicar no botão
+    if (onDelete) {
+      onDelete()
+    }
+  }
 
   return (
     <div
       onClick={() => navigate(`/pacientes/${patient.id}`)}
-      className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition cursor-pointer group"
+      className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition cursor-pointer group relative"
     >
+      <button
+        onClick={handleDeleteClick}
+        className="absolute top-3 right-3 p-1.5 sm:p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100 z-10"
+        title="Excluir paciente"
+      >
+        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+      </button>
+
       <div className="flex items-start gap-3 sm:gap-4">
         <div className="flex-shrink-0">
           <div className="w-12 h-12 sm:w-16 sm:h-16 bg-primary bg-opacity-10 rounded-full flex items-center justify-center group-hover:bg-opacity-20 transition">

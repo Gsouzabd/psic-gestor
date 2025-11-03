@@ -16,6 +16,13 @@ import {
 } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
+// Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
+const parseLocalDate = (dateString) => {
+  if (!dateString) return new Date()
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 export default function Calendar({ sessions = [], onEventClick }) {
   const [currentMonth, setCurrentMonth] = useState(new Date())
 
@@ -33,7 +40,19 @@ export default function Calendar({ sessions = [], onEventClick }) {
   const sessionsByDate = useMemo(() => {
     const grouped = {}
     sessions.forEach(session => {
-      const dateKey = format(parseISO(session.data), 'yyyy-MM-dd')
+      if (!session.data) return
+      
+      // Usar a data diretamente se já estiver no formato YYYY-MM-DD
+      // ou converter se necessário
+      let dateKey = session.data
+      if (dateKey.includes('T')) {
+        dateKey = dateKey.split('T')[0]
+      }
+      // Garantir formato YYYY-MM-DD
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        dateKey = format(parseLocalDate(dateKey), 'yyyy-MM-dd')
+      }
+      
       if (!grouped[dateKey]) {
         grouped[dateKey] = []
       }

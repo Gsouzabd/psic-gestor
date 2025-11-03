@@ -8,6 +8,7 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
   const [loading, setLoading] = useState(true)
   const [sessoes, setSessoes] = useState([])
   const [showNewModal, setShowNewModal] = useState(false)
+  const [editingSessao, setEditingSessao] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({
@@ -49,47 +50,108 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
     }))
   }
 
+  const handleEdit = async (sessao) => {
+    try {
+      // Buscar pagamento vinculado
+      const { data: pagamento } = await supabase
+        .from('pagamentos')
+        .select('*')
+        .eq('prontuario_id', sessao.id)
+        .single()
+
+      setEditingSessao(sessao)
+      setFormData({
+        data: sessao.data,
+        hora: sessao.hora || '',
+        compareceu: sessao.compareceu ?? true,
+        anotacoes: sessao.anotacoes || '',
+        valor_sessao: pagamento?.valor_sessao || paciente.valor_sessao || '',
+        desconto: pagamento?.desconto || '0'
+      })
+      setShowNewModal(true)
+      setError('')
+    } catch (error) {
+      console.error('Erro ao carregar dados da sessão:', error)
+      setError('Erro ao carregar dados da sessão.')
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setSaving(true)
 
     try {
-      // Criar prontuário
-      const { data: prontuario, error: prontuarioError } = await supabase
-        .from('prontuarios')
-        .insert([
-          {
-            paciente_id: pacienteId,
-            data: formData.data,
+      // Garantir que a data seja enviada corretamente (formato YYYY-MM-DD)
+      // O input type="date" já retorna no formato correto, mas vamos garantir
+      const dataFormatada = formData.data // Já está no formato YYYY-MM-DD
+
+      if (editingSessao) {
+        // Atualizar prontuário existente
+        const { error: prontuarioError } = await supabase
+          .from('prontuarios')
+          .update({
+            data: dataFormatada,
             hora: formData.hora,
             compareceu: formData.compareceu,
-            anotacoes: formData.anotacoes
-          }
-        ])
-        .select()
-        .single()
+            anotacoes: formData.anotacoes,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingSessao.id)
 
-      if (prontuarioError) throw prontuarioError
+        if (prontuarioError) throw prontuarioError
 
-      // Criar pagamento vinculado
-      const { error: pagamentoError } = await supabase
-        .from('pagamentos')
-        .insert([
-          {
-            prontuario_id: prontuario.id,
-            paciente_id: pacienteId,
-            data: formData.data,
+        // Atualizar pagamento vinculado
+        const { error: pagamentoError } = await supabase
+          .from('pagamentos')
+          .update({
+            data: dataFormatada,
             valor_sessao: parseFloat(formData.valor_sessao) || 0,
             desconto: parseFloat(formData.desconto) || 0,
             compareceu: formData.compareceu,
-            pago: false
-          }
-        ])
+            updated_at: new Date().toISOString()
+          })
+          .eq('prontuario_id', editingSessao.id)
 
-      if (pagamentoError) throw pagamentoError
+        if (pagamentoError) throw pagamentoError
+      } else {
+        // Criar novo prontuário
+        const { data: prontuario, error: prontuarioError } = await supabase
+          .from('prontuarios')
+          .insert([
+            {
+              paciente_id: pacienteId,
+              data: dataFormatada,
+              hora: formData.hora,
+              compareceu: formData.compareceu,
+              anotacoes: formData.anotacoes
+            }
+          ])
+          .select()
+          .single()
+
+        if (prontuarioError) throw prontuarioError
+
+        // Criar pagamento vinculado
+        const { error: pagamentoError } = await supabase
+          .from('pagamentos')
+          .insert([
+            {
+              prontuario_id: prontuario.id,
+              paciente_id: pacienteId,
+              data: dataFormatada,
+              valor_sessao: parseFloat(formData.valor_sessao) || 0,
+              desconto: parseFloat(formData.desconto) || 0,
+              compareceu: formData.compareceu,
+              pago: false
+            }
+          ])
+
+        if (pagamentoError) throw pagamentoError
+      }
 
       setShowNewModal(false)
+      setEditingSessao(null)
       setFormData({
         data: '',
         hora: '',
@@ -100,8 +162,8 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
       })
       fetchSessoes()
     } catch (error) {
-      console.error('Erro ao criar sessão:', error)
-      setError('Erro ao criar sessão. Tente novamente.')
+      console.error('Erro ao salvar sessão:', error)
+      setError(editingSessao ? 'Erro ao atualizar sessão. Tente novamente.' : 'Erro ao criar sessão. Tente novamente.')
     } finally {
       setSaving(false)
     }
@@ -168,16 +230,29 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
               key={sessao.id}
               sessao={sessao}
               onDelete={handleDelete}
+              onEdit={handleEdit}
             />
           ))}
         </div>
       )}
 
-      {/* Modal Nova Sessão */}
+      {/* Modal Nova/Editar Sessão */}
       <Modal
         isOpen={showNewModal}
-        onClose={() => setShowNewModal(false)}
-        title="Nova Sessão"
+        onClose={() => {
+          setShowNewModal(false)
+          setEditingSessao(null)
+          setFormData({
+            data: '',
+            hora: '',
+            compareceu: true,
+            anotacoes: '',
+            valor_sessao: paciente.valor_sessao || '',
+            desconto: '0'
+          })
+          setError('')
+        }}
+        title={editingSessao ? "Editar Sessão" : "Nova Sessão"}
         size="md"
       >
         {error && (
@@ -308,7 +383,19 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
           <div className="flex gap-3 pt-4">
             <button
               type="button"
-              onClick={() => setShowNewModal(false)}
+              onClick={() => {
+                setShowNewModal(false)
+                setEditingSessao(null)
+                setFormData({
+                  data: '',
+                  hora: '',
+                  compareceu: true,
+                  anotacoes: '',
+                  valor_sessao: paciente.valor_sessao || '',
+                  desconto: '0'
+                })
+                setError('')
+              }}
               className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
             >
               Cancelar
@@ -318,7 +405,7 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
               disabled={saving}
               className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
             >
-              {saving ? 'Salvando...' : 'Registrar Sessão'}
+              {saving ? 'Salvando...' : editingSessao ? 'Salvar Alterações' : 'Registrar Sessão'}
             </button>
           </div>
         </form>

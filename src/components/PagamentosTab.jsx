@@ -1,13 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { DollarSign, CheckCircle, XCircle, Filter } from 'lucide-react'
+import { DollarSign, CheckCircle, XCircle, Filter, ChevronDown, ChevronUp } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+
+// Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
+const parseLocalDate = (dateString) => {
+  if (!dateString) return new Date()
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
 
 export default function PagamentosTab({ pacienteId, paciente }) {
   const [loading, setLoading] = useState(true)
   const [pagamentos, setPagamentos] = useState([])
   const [filtro, setFiltro] = useState('todos') // todos, pagos, pendentes
+  const [mesesExpandidos, setMesesExpandidos] = useState(new Set())
   const [resumo, setResumo] = useState({
     totalSessoes: 0,
     totalReceber: 0,
@@ -76,6 +84,76 @@ export default function PagamentosTab({ pacienteId, paciente }) {
     if (filtro === 'pendentes') return !p.pago
     return true
   })
+
+  // Agrupar pagamentos por mês
+  const pagamentosPorMes = useMemo(() => {
+    const agrupados = {}
+    
+    pagamentosFiltrados.forEach(pagamento => {
+      if (!pagamento.data) return
+      
+      const date = parseLocalDate(pagamento.data)
+      const mesAno = format(date, 'yyyy-MM')
+      const mesAnoLabel = format(date, 'MMMM yyyy', { locale: ptBR })
+      
+      if (!agrupados[mesAno]) {
+        agrupados[mesAno] = {
+          label: mesAnoLabel,
+          pagamentos: [],
+          totalSessoes: 0,
+          totalReceber: 0,
+          totalRecebido: 0,
+          saldoAberto: 0
+        }
+      }
+      
+      agrupados[mesAno].pagamentos.push(pagamento)
+      agrupados[mesAno].totalSessoes++
+      agrupados[mesAno].totalReceber += parseFloat(pagamento.valor_final || 0)
+      
+      if (pagamento.pago) {
+        agrupados[mesAno].totalRecebido += parseFloat(pagamento.valor_final || 0)
+      }
+    })
+    
+    // Calcular saldo em aberto para cada mês
+    Object.keys(agrupados).forEach(mes => {
+      agrupados[mes].saldoAberto = agrupados[mes].totalReceber - agrupados[mes].totalRecebido
+    })
+    
+    // Ordenar por data (mais recente primeiro)
+    return Object.keys(agrupados)
+      .sort((a, b) => b.localeCompare(a))
+      .map(mes => ({ mes, ...agrupados[mes] }))
+  }, [pagamentosFiltrados])
+
+  // Expandir mês atual automaticamente
+  useEffect(() => {
+    if (pagamentosPorMes.length > 0 && mesesExpandidos.size === 0) {
+      const hoje = new Date()
+      const mesAtual = format(hoje, 'yyyy-MM')
+      const mesAtualExiste = pagamentosPorMes.find(p => p.mes === mesAtual)
+      
+      if (mesAtualExiste) {
+        setMesesExpandidos(new Set([mesAtual]))
+      } else if (pagamentosPorMes.length > 0) {
+        // Se não houver mês atual, expandir o primeiro (mais recente)
+        setMesesExpandidos(new Set([pagamentosPorMes[0].mes]))
+      }
+    }
+  }, [pagamentosPorMes])
+
+  const toggleMes = (mes) => {
+    setMesesExpandidos(prev => {
+      const novo = new Set(prev)
+      if (novo.has(mes)) {
+        novo.delete(mes)
+      } else {
+        novo.add(mes)
+      }
+      return novo
+    })
+  }
 
   if (loading) {
     return (
@@ -178,7 +256,7 @@ export default function PagamentosTab({ pacienteId, paciente }) {
         </div>
       </div>
 
-      {/* Tabela de Pagamentos */}
+      {/* Pagamentos por Mês */}
       {pagamentosFiltrados.length === 0 ? (
         <div className="bg-gray-50 rounded-lg p-8 sm:p-12 text-center border-2 border-dashed border-gray-300">
           <DollarSign className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-gray-400 mb-3" />
@@ -189,81 +267,123 @@ export default function PagamentosTab({ pacienteId, paciente }) {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px]">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data</th>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Comp.</th>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Valor</th>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Desc.</th>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Total</th>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
-                  <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-xs font-semibold text-gray-600 uppercase">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {pagamentosFiltrados.map((pagamento) => (
-                  <tr key={pagamento.id} className="hover:bg-gray-50 transition">
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
-                      <span className="text-xs sm:text-sm text-gray-900">
-                        {format(new Date(pagamento.data), "dd/MM/yy", { locale: ptBR })}
+        <div className="space-y-4">
+          {pagamentosPorMes.map(({ mes, label, pagamentos: pagamentosMes, totalSessoes, totalReceber, totalRecebido, saldoAberto }) => {
+            const isExpanded = mesesExpandidos.has(mes)
+            
+            return (
+              <div key={mes} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                {/* Header do Mês */}
+                <button
+                  onClick={() => toggleMes(mes)}
+                  className="w-full px-4 sm:px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition"
+                >
+                  <div className="flex-1 text-left">
+                    <h3 className="text-lg sm:text-xl font-semibold text-gray-900 capitalize">{label}</h3>
+                    <div className="flex flex-wrap gap-4 sm:gap-6 mt-2 text-xs sm:text-sm">
+                      <span className="text-gray-600">
+                        <span className="font-medium text-gray-900">{totalSessoes}</span> sessões
                       </span>
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
-                      {pagamento.compareceu ? (
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <XCircle className="w-4 h-4 text-red-600" />
-                      )}
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
-                      <span className="text-xs sm:text-sm text-gray-900">
-                        R$ {parseFloat(pagamento.valor_sessao).toFixed(2)}
+                      <span className="text-gray-600">
+                        A receber: <span className="font-medium text-gray-900">R$ {totalReceber.toFixed(2)}</span>
                       </span>
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
-                      <span className="text-xs sm:text-sm text-gray-600">
-                        {parseFloat(pagamento.desconto) > 0 ? `-R$ ${parseFloat(pagamento.desconto).toFixed(2)}` : '-'}
+                      <span className="text-gray-600">
+                        Recebido: <span className="font-medium text-green-700">R$ {totalRecebido.toFixed(2)}</span>
                       </span>
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
-                      <span className="text-xs sm:text-sm font-semibold text-gray-900">
-                        R$ {parseFloat(pagamento.valor_final).toFixed(2)}
+                      <span className="text-gray-600">
+                        Em aberto: <span className="font-medium text-yellow-700">R$ {saldoAberto.toFixed(2)}</span>
                       </span>
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
-                      {pagamento.pago ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                          <CheckCircle className="w-3 h-3" />
-                          <span className="hidden sm:inline">Pago</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
-                          <XCircle className="w-3 h-3" />
-                          <span className="hidden sm:inline">Pend.</span>
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
-                      <button
-                        onClick={() => handleTogglePago(pagamento.id, pagamento.pago)}
-                        className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                          pagamento.pago
-                            ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            : 'bg-primary text-white hover:bg-opacity-90'
-                        }`}
-                      >
-                        <span className="hidden md:inline">{pagamento.pago ? 'Marcar Pendente' : 'Marcar como Pago'}</span>
-                        <span className="md:hidden">{pagamento.pago ? 'Pend.' : 'Pago'}</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </div>
+                  {isExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  )}
+                </button>
+
+                {/* Tabela do Mês */}
+                {isExpanded && (
+                  <div className="border-t border-gray-200">
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[640px]">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data</th>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Comp.</th>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Valor</th>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Desc.</th>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Total</th>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
+                            <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-xs font-semibold text-gray-600 uppercase">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {pagamentosMes.map((pagamento) => (
+                            <tr key={pagamento.id} className="hover:bg-gray-50 transition">
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                                <span className="text-xs sm:text-sm text-gray-900">
+                                  {format(parseLocalDate(pagamento.data), "dd/MM/yy", { locale: ptBR })}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                                {pagamento.compareceu ? (
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-red-600" />
+                                )}
+                              </td>
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
+                                <span className="text-xs sm:text-sm text-gray-900">
+                                  R$ {parseFloat(pagamento.valor_sessao).toFixed(2)}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
+                                <span className="text-xs sm:text-sm text-gray-600">
+                                  {parseFloat(pagamento.desconto) > 0 ? `-R$ ${parseFloat(pagamento.desconto).toFixed(2)}` : '-'}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
+                                <span className="text-xs sm:text-sm font-semibold text-gray-900">
+                                  R$ {parseFloat(pagamento.valor_final).toFixed(2)}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
+                                {pagamento.pago ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                    <CheckCircle className="w-3 h-3" />
+                                    <span className="hidden sm:inline">Pago</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                                    <XCircle className="w-3 h-3" />
+                                    <span className="hidden sm:inline">Pend.</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
+                                <button
+                                  onClick={() => handleTogglePago(pagamento.id, pagamento.pago)}
+                                  className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                                    pagamento.pago
+                                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                      : 'bg-primary text-white hover:bg-opacity-90'
+                                  }`}
+                                >
+                                  <span className="hidden md:inline">{pagamento.pago ? 'Marcar Pendente' : 'Marcar como Pago'}</span>
+                                  <span className="md:hidden">{pagamento.pago ? 'Pend.' : 'Pago'}</span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

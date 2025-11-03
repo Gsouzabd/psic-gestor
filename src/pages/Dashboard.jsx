@@ -9,6 +9,13 @@ import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, 
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
+// Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
+const parseLocalDate = (dateString) => {
+  if (!dateString) return new Date()
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -212,7 +219,7 @@ export default function Dashboard() {
                         <div className="min-w-0 flex-1">
                           <p className="font-semibold text-gray-900 text-sm sm:text-base truncate">{sessao.pacientes.nome_completo}</p>
                           <p className="text-xs sm:text-sm text-gray-600">
-                            {format(new Date(sessao.data), "dd 'de' MMM", { locale: ptBR })} às {sessao.hora?.slice(0, 5)}
+                            {format(parseLocalDate(sessao.data), "dd 'de' MMM", { locale: ptBR })} às {sessao.hora?.slice(0, 5)}
                           </p>
                         </div>
                       </div>
@@ -257,7 +264,7 @@ export default function Dashboard() {
               <div>
                 <label className="text-sm font-medium text-gray-600">Data</label>
                 <p className="text-gray-900">
-                  {format(new Date(selectedSession.data), "dd/MM/yyyy", { locale: ptBR })}
+                  {format(parseLocalDate(selectedSession.data), "dd/MM/yyyy", { locale: ptBR })}
                 </p>
               </div>
               <div>

@@ -1,9 +1,16 @@
 import { useState } from 'react'
-import { Calendar, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { Calendar, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Edit } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
-export default function SessionCard({ sessao, onDelete }) {
+// Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
+const parseLocalDate = (dateString) => {
+  if (!dateString) return new Date()
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+export default function SessionCard({ sessao, onDelete, onEdit }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -28,7 +35,7 @@ export default function SessionCard({ sessao, onDelete }) {
               <div className="flex items-center gap-3 mb-2">
                 <div className="flex items-center gap-1 text-sm text-gray-600">
                   <Calendar className="w-4 h-4" />
-                  <span>{format(new Date(sessao.data), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
+                  <span>{format(parseLocalDate(sessao.data), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
                 </div>
                 <div className="flex items-center gap-1 text-sm text-gray-600">
                   <Clock className="w-4 h-4" />
@@ -76,7 +83,19 @@ export default function SessionCard({ sessao, onDelete }) {
             <p className="text-sm text-gray-500 italic mb-4">Sem anotações registradas</p>
           )}
           
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {onEdit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onEdit(sessao)
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-primary hover:bg-primary hover:bg-opacity-10 rounded-lg transition text-sm font-medium"
+              >
+                <Edit className="w-4 h-4" />
+                Editar Sessão
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation()

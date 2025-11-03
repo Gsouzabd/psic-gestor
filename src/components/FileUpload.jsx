@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { Upload, FileText, Download, Trash2, AlertCircle } from 'lucide-react'
+import { useToast } from '../contexts/ToastContext'
+import { Upload, FileText, Download, Trash2 } from 'lucide-react'
 
 export default function FileUpload({ pacienteId, currentFileUrl, onFileUploaded }) {
   const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
+  const { success, error: showError } = useToast()
   const fileInputRef = useRef(null)
 
   const handleFileSelect = async (e) => {
@@ -14,41 +15,53 @@ export default function FileUpload({ pacienteId, currentFileUrl, onFileUploaded 
     // Validar tipo de arquivo
     const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png']
     if (!allowedTypes.includes(file.type)) {
-      setError('Apenas arquivos PDF e imagens (JPG, PNG) são permitidos')
+      showError('Apenas arquivos PDF e imagens (JPG, PNG) são permitidos')
       return
     }
 
     // Validar tamanho (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
-      setError('O arquivo deve ter no máximo 5MB')
+      showError('O arquivo deve ter no máximo 5MB')
       return
     }
 
-    setError('')
     setUploading(true)
 
     try {
       // Criar nome único para o arquivo
       const fileExt = file.name.split('.').pop()
       const fileName = `${pacienteId}_${Date.now()}.${fileExt}`
-      const filePath = `contratos/${fileName}`
+      const filePath = fileName // Sem a pasta "contratos/" no path
 
       // Upload para Supabase Storage
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError, data: uploadData } = await supabase.storage
         .from('contratos')
-        .upload(filePath, file)
+        .upload(filePath, file, {
+          upsert: false // Não sobrescrever arquivos existentes
+        })
 
-      if (uploadError) throw uploadError
+      if (uploadError) {
+        const message = uploadError?.message || 'Erro ao fazer upload do arquivo. Tente novamente.'
+        showError(message)
+        throw uploadError
+      }
 
-      // Obter URL pública
+      // Verificar se há mensagem no response de sucesso
+      const responseMessage = uploadData?.message
+
+      // Obter URL pública do arquivo
       const { data: { publicUrl } } = supabase.storage
         .from('contratos')
         .getPublicUrl(filePath)
 
       onFileUploaded(publicUrl)
+      
+      const successMessage = responseMessage || 'Arquivo enviado com sucesso!'
+      success(successMessage)
     } catch (error) {
       console.error('Erro ao fazer upload:', error)
-      setError('Erro ao fazer upload do arquivo. Tente novamente.')
+      const message = error?.message || 'Erro ao fazer upload do arquivo. Tente novamente.'
+      showError(message)
     } finally {
       setUploading(false)
       if (fileInputRef.current) {
@@ -64,33 +77,53 @@ export default function FileUpload({ pacienteId, currentFileUrl, onFileUploaded 
 
     try {
       // Extrair o path do arquivo da URL
+      // A URL pode ser: 
+      // https://...supabase.co/storage/v1/object/public/contratos/nome_arquivo.pdf
+      // ou (formato antigo): https://...supabase.co/storage/v1/object/public/contratos/contratos/nome_arquivo.pdf
+      // ou signed URL com query params
       const urlParts = currentFileUrl.split('/')
-      const fileName = urlParts[urlParts.length - 1]
-      const filePath = `contratos/${fileName}`
+      let fileName = urlParts[urlParts.length - 1]
+      
+      // Se o penúltimo elemento for "contratos", pode ser formato antigo duplicado
+      // Pegar o último elemento que deve ser o nome do arquivo
+      if (urlParts[urlParts.length - 2] === 'contratos' && urlParts[urlParts.length - 3] === 'contratos') {
+        // Formato antigo: contratos/contratos/nome_arquivo.pdf
+        fileName = urlParts[urlParts.length - 1]
+      }
+      
+      // Remover query params se houver (signed URLs)
+      if (fileName.includes('?')) {
+        fileName = fileName.split('?')[0]
+      }
+      
+      const filePath = fileName // Sem a pasta "contratos/" no path
 
       // Deletar do storage
-      const { error } = await supabase.storage
+      const { error, data } = await supabase.storage
         .from('contratos')
         .remove([filePath])
 
-      if (error) throw error
+      if (error) {
+        const message = error?.message || 'Erro ao deletar arquivo. Tente novamente.'
+        showError(message)
+        throw error
+      }
+
+      // Verificar se há mensagem no response de sucesso
+      const responseMessage = data?.message
 
       onFileUploaded('')
+      const successMessage = responseMessage || 'Arquivo excluído com sucesso!'
+      success(successMessage)
     } catch (error) {
       console.error('Erro ao deletar arquivo:', error)
-      setError('Erro ao deletar arquivo. Tente novamente.')
+      const message = error?.message || 'Erro ao deletar arquivo. Tente novamente.'
+      showError(message)
     }
   }
 
   return (
     <div className="space-y-4">
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <span className="text-sm text-red-800">{error}</span>
-        </div>
-      )}
-
       {currentFileUrl ? (
         <div className="border-2 border-gray-200 rounded-lg p-4 bg-gray-50">
           <div className="flex items-center justify-between">

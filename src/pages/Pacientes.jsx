@@ -5,12 +5,14 @@ import PatientCard from '../components/PatientCard'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
 import { Search, Plus, UserPlus, AlertCircle } from 'lucide-react'
 
 export default function Pacientes() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
+  const { success, error: showError } = useToast()
   const [pacientes, setPacientes] = useState([])
   const [filteredPacientes, setFilteredPacientes] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -99,12 +101,32 @@ export default function Pacientes() {
         .select()
         .single()
 
-      if (error) throw error
+      if (error) {
+        const message = error?.message || 'Erro ao criar paciente. Tente novamente.'
+        showError(message)
+        throw error
+      }
 
-      // Criar anamnese vazia
-      await supabase
+      // Verificar se há mensagem no response de sucesso
+      const responseMessage = data?.message
+
+      // Criar anamnese vazia (usar upsert para evitar erro se já existir)
+      const { error: anamneseError } = await supabase
         .from('anamneses')
-        .insert([{ paciente_id: data.id }])
+        .upsert({ paciente_id: data.id }, {
+          onConflict: 'paciente_id'
+        })
+      
+      if (anamneseError) {
+        console.warn('Erro ao criar anamnese vazia:', anamneseError)
+        const anamneseMessage = anamneseError?.message
+        if (anamneseMessage) {
+          showError(anamneseMessage)
+        }
+      }
+
+      const successMessage = responseMessage || 'Paciente criado com sucesso!'
+      success(successMessage)
 
       setShowNewModal(false)
       setFormData({
@@ -120,13 +142,82 @@ export default function Pacientes() {
         valor_sessao: ''
       })
       
-      // Navegar para detalhes do paciente
-      navigate(`/pacientes/${data.id}`)
+      // Navegar para detalhes do paciente na aba de dados pessoais
+      navigate(`/pacientes/${data.id}?tab=dados`)
     } catch (error) {
       console.error('Erro ao criar paciente:', error)
-      setError('Erro ao criar paciente. Tente novamente.')
+      const message = error?.message || 'Erro ao criar paciente. Tente novamente.'
+      showError(message)
+      setError(message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDeletePaciente = async (pacienteId, pacienteNome) => {
+    if (!confirm(`Tem certeza que deseja excluir o paciente "${pacienteNome}"?\n\nEsta ação não pode ser desfeita e todos os dados relacionados (anamnese, prontuários e pagamentos) serão removidos.`)) {
+      return
+    }
+
+    try {
+      // Deletar prontuários e pagamentos relacionados
+      const { data: prontuarios } = await supabase
+        .from('prontuarios')
+        .select('id')
+        .eq('paciente_id', pacienteId)
+
+      if (prontuarios && prontuarios.length > 0) {
+        const prontuarioIds = prontuarios.map(p => p.id)
+        
+        // Deletar pagamentos relacionados aos prontuários
+        await supabase
+          .from('pagamentos')
+          .delete()
+          .in('prontuario_id', prontuarioIds)
+
+        // Deletar prontuários
+        await supabase
+          .from('prontuarios')
+          .delete()
+          .eq('paciente_id', pacienteId)
+      }
+
+      // Deletar pagamentos diretos (se houver)
+      await supabase
+        .from('pagamentos')
+        .delete()
+        .eq('paciente_id', pacienteId)
+
+      // Deletar anamnese
+      await supabase
+        .from('anamneses')
+        .delete()
+        .eq('paciente_id', pacienteId)
+
+      // Deletar paciente
+      const { error, data } = await supabase
+        .from('pacientes')
+        .delete()
+        .eq('id', pacienteId)
+        .select()
+
+      if (error) {
+        const message = error?.message || 'Erro ao deletar paciente. Tente novamente.'
+        showError(message)
+        throw error
+      }
+
+      // Verificar se há mensagem no response de sucesso
+      const responseMessage = data?.message
+      const successMessage = responseMessage || `Paciente "${pacienteNome}" excluído com sucesso!`
+      success(successMessage)
+      
+      // Atualizar lista de pacientes
+      fetchPacientes()
+    } catch (error) {
+      console.error('Erro ao deletar paciente:', error)
+      const message = error?.message || 'Erro ao deletar paciente. Tente novamente.'
+      showError(message)
     }
   }
 
@@ -194,7 +285,11 @@ export default function Pacientes() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {filteredPacientes.map(paciente => (
-              <PatientCard key={paciente.id} patient={paciente} />
+              <PatientCard 
+                key={paciente.id} 
+                patient={paciente} 
+                onDelete={() => handleDeletePaciente(paciente.id, paciente.nome_completo)}
+              />
             ))}
           </div>
         )}

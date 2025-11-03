@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import FileUpload from './FileUpload'
-import { Save, AlertCircle, CheckCircle } from 'lucide-react'
+import { useToast } from '../contexts/ToastContext'
+import { Save } from 'lucide-react'
 
 export default function AnamneseTab({ pacienteId, paciente }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState({ type: '', text: '' })
+  const { success, error: showError } = useToast()
   const [formData, setFormData] = useState({
     // Identificação dos Pais
     nome_pai: '',
@@ -28,6 +29,10 @@ export default function AnamneseTab({ pacienteId, paciente }) {
     tempo_psicoterapia: '',
     acompanhamento_psiquiatrico: false,
     medicacao_atual: '',
+    // Contato de Emergência
+    nome_contato_emergencia: '',
+    telefone_contato_emergencia: '',
+    parentesco_contato_emergencia: '',
     // Contrato
     contrato_url: ''
   })
@@ -64,6 +69,9 @@ export default function AnamneseTab({ pacienteId, paciente }) {
           tempo_psicoterapia: data.tempo_psicoterapia || '',
           acompanhamento_psiquiatrico: data.acompanhamento_psiquiatrico || false,
           medicacao_atual: data.medicacao_atual || '',
+          nome_contato_emergencia: data.nome_contato_emergencia || '',
+          telefone_contato_emergencia: data.telefone_contato_emergencia || '',
+          parentesco_contato_emergencia: data.parentesco_contato_emergencia || '',
           contrato_url: data.contrato_url || ''
         })
       }
@@ -84,26 +92,40 @@ export default function AnamneseTab({ pacienteId, paciente }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    setMessage({ type: '', text: '' })
     setSaving(true)
 
     try {
-      const { error } = await supabase
+      const { error, data } = await supabase
         .from('anamneses')
         .upsert({
           paciente_id: pacienteId,
           ...formData,
           idade_pai: formData.idade_pai ? parseInt(formData.idade_pai) : null,
           idade_mae: formData.idade_mae ? parseInt(formData.idade_mae) : null,
+        }, {
+          onConflict: 'paciente_id'
         })
 
-      if (error) throw error
+      if (error) {
+        // Verificar se há mensagem no response do erro
+        const errorMessage = error?.message
+        if (errorMessage) {
+          showError(errorMessage)
+        }
+        throw error
+      }
 
-      setMessage({ type: 'success', text: 'Anamnese salva com sucesso!' })
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+      // Verificar se há mensagem no response de sucesso
+      const responseMessage = data?.message
+      if (responseMessage) {
+        success(responseMessage)
+      } else {
+        success('Anamnese salva com sucesso!')
+      }
     } catch (error) {
       console.error('Erro ao salvar anamnese:', error)
-      setMessage({ type: 'error', text: 'Erro ao salvar anamnese. Tente novamente.' })
+      const message = error?.message || 'Erro ao salvar anamnese. Tente novamente.'
+      showError(message)
     } finally {
       setSaving(false)
     }
@@ -123,23 +145,6 @@ export default function AnamneseTab({ pacienteId, paciente }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
-      {message.text && (
-        <div className={`p-4 rounded-lg flex items-start gap-3 ${
-          message.type === 'success' 
-            ? 'bg-green-50 border border-green-200' 
-            : 'bg-red-50 border border-red-200'
-        }`}>
-          {message.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-          ) : (
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          )}
-          <span className={`text-sm ${message.type === 'success' ? 'text-green-800' : 'text-red-800'}`}>
-            {message.text}
-          </span>
-        </div>
-      )}
-
       {/* Identificação dos Pais */}
       <div className="space-y-4">
         <h3 className="text-xl font-semibold text-gray-900 pb-2 border-b border-gray-200">
@@ -355,6 +360,51 @@ export default function AnamneseTab({ pacienteId, paciente }) {
                 />
               )}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Contato de Emergência */}
+      <div className="space-y-4">
+        <h3 className="text-xl font-semibold text-gray-900 pb-2 border-b border-gray-200">
+          🚨 Contato de Emergência
+        </h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Nome do Contato</label>
+            <input
+              type="text"
+              name="nome_contato_emergencia"
+              value={formData.nome_contato_emergencia}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="Nome completo do contato de emergência"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Telefone</label>
+            <input
+              type="tel"
+              name="telefone_contato_emergencia"
+              value={formData.telefone_contato_emergencia}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="(00) 00000-0000"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Parentesco</label>
+            <input
+              type="text"
+              name="parentesco_contato_emergencia"
+              value={formData.parentesco_contato_emergencia}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="Ex: Pai, Mãe, Avó, Tio, etc."
+            />
           </div>
         </div>
       </div>

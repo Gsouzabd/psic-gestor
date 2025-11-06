@@ -106,10 +106,13 @@ export const AuthProvider = ({ children }) => {
     return { error }
   }
 
+  const isAdmin = profile?.role === 'admin_master'
+
   const value = {
     user,
     profile,
     loading,
+    isAdmin,
     signUp,
     signIn,
     signOut,

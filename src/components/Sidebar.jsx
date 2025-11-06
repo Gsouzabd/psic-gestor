@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LayoutDashboard, Users, LogOut, User, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, User, Menu, X, Shield, Settings } from 'lucide-react'
 
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { signOut, profile } = useAuth()
+  const { signOut, profile, isAdmin } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
 
   const handleLogout = async () => {
@@ -21,6 +21,8 @@ export default function Sidebar() {
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/pacientes', icon: Users, label: 'Pacientes' },
+    { path: '/configuracoes', icon: Settings, label: 'Configurações' },
+    ...(isAdmin ? [{ path: '/admin', icon: Shield, label: 'Admin' }] : []),
   ]
 
   const closeSidebar = () => setIsOpen(false)

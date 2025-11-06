@@ -7,6 +7,8 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Pacientes from './pages/Pacientes'
 import PacienteDetalhes from './pages/PacienteDetalhes'
+import Admin from './pages/Admin'
+import Configuracoes from './pages/Configuracoes'
 
 function App() {
   return (
@@ -37,6 +39,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <PacienteDetalhes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requireAdmin={true}>
+                <Admin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/configuracoes"
+            element={
+              <ProtectedRoute>
+                <Configuracoes />
               </ProtectedRoute>
             }
           />

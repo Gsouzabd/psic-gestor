@@ -106,3 +106,4 @@ Após o upload:
 - ⚠️ O `.htaccess` já é copiado automaticamente na pasta `dist/` ao rodar `npm run build`
 
 
+

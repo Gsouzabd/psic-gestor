@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Calendar, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Edit } from 'lucide-react'
+import { Calendar, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Edit, Repeat } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -22,12 +22,18 @@ export default function SessionCard({ sessao, onDelete, onEdit }) {
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-4 flex-1">
             <div className={`p-3 rounded-lg ${
-              sessao.compareceu ? 'bg-green-50' : 'bg-red-50'
+              sessao.compareceu === true 
+                ? 'bg-green-50' 
+                : sessao.compareceu === false 
+                ? 'bg-red-50' 
+                : 'bg-yellow-50'
             }`}>
-              {sessao.compareceu ? (
+              {sessao.compareceu === true ? (
                 <CheckCircle className="w-6 h-6 text-green-600" />
-              ) : (
+              ) : sessao.compareceu === false ? (
                 <XCircle className="w-6 h-6 text-red-600" />
+              ) : (
+                <Calendar className="w-6 h-6 text-yellow-600" />
               )}
             </div>
             
@@ -51,14 +57,24 @@ export default function SessionCard({ sessao, onDelete, onEdit }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 ml-4">
-            {sessao.compareceu ? (
+          <div className="flex items-center gap-2 ml-4 flex-wrap">
+            {sessao.recorrencia_id && (
+              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium flex items-center gap-1">
+                <Repeat className="w-3 h-3" />
+                Recorrente
+              </span>
+            )}
+            {sessao.compareceu === true ? (
               <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
                 Compareceu
               </span>
-            ) : (
+            ) : sessao.compareceu === false ? (
               <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
                 Faltou
+              </span>
+            ) : (
+              <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                Agendado
               </span>
             )}
             {expanded ? (

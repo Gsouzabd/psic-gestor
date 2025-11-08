@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { DollarSign, CheckCircle, XCircle, Filter, ChevronDown, ChevronUp } from 'lucide-react'
+import { DollarSign, CheckCircle, XCircle, Filter, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -327,10 +327,12 @@ export default function PagamentosTab({ pacienteId, paciente }) {
                                 </span>
                               </td>
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
-                                {pagamento.compareceu ? (
+                                {pagamento.compareceu === true ? (
                                   <CheckCircle className="w-4 h-4 text-green-600" />
-                                ) : (
+                                ) : pagamento.compareceu === false ? (
                                   <XCircle className="w-4 h-4 text-red-600" />
+                                ) : (
+                                  <Calendar className="w-4 h-4 text-yellow-600" />
                                 )}
                               </td>
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
@@ -349,17 +351,25 @@ export default function PagamentosTab({ pacienteId, paciente }) {
                                 </span>
                               </td>
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
-                                {pagamento.pago ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                                    <CheckCircle className="w-3 h-3" />
-                                    <span className="hidden sm:inline">Pago</span>
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
-                                    <XCircle className="w-3 h-3" />
-                                    <span className="hidden sm:inline">Pend.</span>
-                                  </span>
-                                )}
+                                <div className="flex flex-col items-center gap-1">
+                                  {pagamento.previsao && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                                      <span className="hidden sm:inline">Pagamento previsto</span>
+                                      <span className="sm:hidden">Previsto</span>
+                                    </span>
+                                  )}
+                                  {pagamento.pago ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                      <CheckCircle className="w-3 h-3" />
+                                      <span className="hidden sm:inline">Pago</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                                      <XCircle className="w-3 h-3" />
+                                      <span className="hidden sm:inline">Pend.</span>
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
                                 <button

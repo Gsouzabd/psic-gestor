@@ -5,9 +5,11 @@ import Calendar from '../components/Calendar'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle } from 'lucide-react'
+import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import RecurrenceOptions from '../components/RecurrenceOptions'
+import { generateRecurringAppointments } from '../utils/recurrence'
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -29,12 +31,41 @@ export default function Dashboard() {
   const [calendarSessions, setCalendarSessions] = useState([])
   const [selectedSession, setSelectedSession] = useState(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
+  const [showAgendamentoModal, setShowAgendamentoModal] = useState(false)
+  const [pacientes, setPacientes] = useState([])
+  const [agendamentoForm, setAgendamentoForm] = useState({
+    paciente_id: '',
+    hora: '',
+    data: '',
+    isRecurring: false,
+    tipoRecorrencia: 'semanal',
+    dataFim: '',
+    criarPrevisao: false
+  })
+  const [savingAgendamento, setSavingAgendamento] = useState(false)
+  const [agendamentoError, setAgendamentoError] = useState('')
 
   useEffect(() => {
     if (user) {
       fetchDashboardData()
+      fetchPacientes()
     }
   }, [user])
+
+  const fetchPacientes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pacientes')
+        .select('id, nome_completo')
+        .eq('psicologo_id', user.id)
+        .order('nome_completo', { ascending: true })
+
+      if (error) throw error
+      setPacientes(data || [])
+    } catch (error) {
+      console.error('Erro ao buscar pacientes:', error)
+    }
+  }
 
   const fetchDashboardData = async () => {
     try {
@@ -77,7 +108,7 @@ export default function Dashboard() {
       // Sessões para o calendário (próximos 60 dias)
       const { data: sessoes } = await supabase
         .from('prontuarios')
-        .select('*, pacientes!inner(id, nome_completo, psicologo_id)')
+        .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id')
         .eq('pacientes.psicologo_id', user.id)
         .order('data', { ascending: true })
 
@@ -104,6 +135,144 @@ export default function Dashboard() {
   const handleEventClick = (session) => {
     setSelectedSession(session)
     setShowSessionModal(true)
+  }
+
+  const handleDayClick = (date) => {
+    const dateString = format(date, 'yyyy-MM-dd')
+    // Calcular data final padrão (3 meses após a data inicial)
+    const defaultEndDate = new Date(date)
+    defaultEndDate.setMonth(defaultEndDate.getMonth() + 3)
+    const defaultEndDateString = format(defaultEndDate, 'yyyy-MM-dd')
+    
+    setAgendamentoForm({
+      paciente_id: '',
+      hora: '',
+      data: dateString,
+      isRecurring: false,
+      tipoRecorrencia: 'semanal',
+      dataFim: defaultEndDateString,
+      criarPrevisao: false
+    })
+    setShowAgendamentoModal(true)
+    setAgendamentoError('')
+  }
+
+  const handleCreateAgendamento = async (e) => {
+    e.preventDefault()
+    setAgendamentoError('')
+    setSavingAgendamento(true)
+
+    try {
+      if (!agendamentoForm.paciente_id || !agendamentoForm.hora) {
+        setAgendamentoError('Por favor, preencha todos os campos obrigatórios.')
+        setSavingAgendamento(false)
+        return
+      }
+
+      if (agendamentoForm.isRecurring && (!agendamentoForm.tipoRecorrencia || !agendamentoForm.dataFim)) {
+        setAgendamentoError('Para agendamentos recorrentes, preencha o tipo e a data final.')
+        setSavingAgendamento(false)
+        return
+      }
+
+      // Buscar valor da sessão do paciente
+      const { data: paciente } = await supabase
+        .from('pacientes')
+        .select('valor_sessao')
+        .eq('id', agendamentoForm.paciente_id)
+        .single()
+
+      const valorSessao = paciente?.valor_sessao || 0
+
+      if (agendamentoForm.isRecurring) {
+        // Criar recorrência
+        const { data: recorrencia, error: recorrenciaError } = await supabase
+          .from('recorrencias')
+          .insert([
+            {
+              paciente_id: agendamentoForm.paciente_id,
+              data_inicio: agendamentoForm.data,
+              hora: agendamentoForm.hora,
+              tipo_recorrencia: agendamentoForm.tipoRecorrencia,
+              data_fim: agendamentoForm.dataFim,
+              ativo: true
+            }
+          ])
+          .select()
+          .single()
+
+        if (recorrenciaError) throw recorrenciaError
+
+        // Gerar todos os agendamentos recorrentes
+        const { prontuarios, errors } = await generateRecurringAppointments({
+          dataInicio: agendamentoForm.data,
+          hora: agendamentoForm.hora,
+          tipoRecorrencia: agendamentoForm.tipoRecorrencia,
+          dataFim: agendamentoForm.dataFim,
+          pacienteId: agendamentoForm.paciente_id,
+          recorrenciaId: recorrencia.id,
+          valorSessao: valorSessao,
+          criarPrevisao: agendamentoForm.criarPrevisao || false
+        })
+
+        if (errors.length > 0) {
+          console.error('Erros ao criar alguns agendamentos:', errors)
+          setAgendamentoError(`Agendamentos criados, mas alguns erros ocorreram: ${errors.length} erro(s)`)
+        }
+      } else {
+        // Criar agendamento único
+        const { data: prontuario, error: prontuarioError } = await supabase
+          .from('prontuarios')
+          .insert([
+            {
+              paciente_id: agendamentoForm.paciente_id,
+              data: agendamentoForm.data,
+              hora: agendamentoForm.hora,
+              compareceu: null, // null = agendado
+              anotacoes: ''
+            }
+          ])
+          .select()
+          .single()
+
+        if (prontuarioError) throw prontuarioError
+
+        // Criar pagamento vinculado
+        const { error: pagamentoError } = await supabase
+          .from('pagamentos')
+          .insert([
+            {
+              prontuario_id: prontuario.id,
+              paciente_id: agendamentoForm.paciente_id,
+              data: agendamentoForm.data,
+              valor_sessao: valorSessao,
+              desconto: 0,
+              compareceu: null, // null = agendado
+              pago: false
+            }
+          ])
+
+        if (pagamentoError) throw pagamentoError
+      }
+
+      // Fechar modal e recarregar dados
+      setShowAgendamentoModal(false)
+      setAgendamentoForm({
+        paciente_id: '',
+        hora: '',
+        data: '',
+        isRecurring: false,
+        tipoRecorrencia: 'semanal',
+        dataFim: '',
+        criarPrevisao: false
+      })
+      fetchDashboardData()
+    } catch (error) {
+      console.error('Erro ao criar agendamento:', error)
+      setAgendamentoError('Erro ao criar agendamento. Tente novamente.')
+    } finally {
+      setSavingAgendamento(false)
+    }
   }
 
   if (loading) {
@@ -189,7 +358,7 @@ export default function Dashboard() {
         {/* Calendário */}
         <div>
           <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4">Agenda de Sessões</h2>
-          <Calendar sessions={calendarSessions} onEventClick={handleEventClick} />
+          <Calendar sessions={calendarSessions} onEventClick={handleEventClick} onDayClick={handleDayClick} />
         </div>
 
         {/* Últimas Sessões */}
@@ -224,17 +393,23 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                        {sessao.compareceu ? (
+                        {sessao.compareceu === true ? (
                           <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium">
                             <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                             <span className="hidden sm:inline">Compareceu</span>
                             <span className="sm:hidden">OK</span>
                           </span>
-                        ) : (
+                        ) : sessao.compareceu === false ? (
                           <span className="flex items-center gap-1 text-red-600 bg-red-50 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium">
                             <XCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                             <span className="hidden sm:inline">Faltou</span>
                             <span className="sm:hidden">X</span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-yellow-600 bg-yellow-50 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium">
+                            <CalendarIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+                            <span className="hidden sm:inline">Agendado</span>
+                            <span className="sm:hidden">Ag</span>
                           </span>
                         )}
                       </div>
@@ -275,15 +450,20 @@ export default function Dashboard() {
             <div>
               <label className="text-sm font-medium text-gray-600">Status</label>
               <div className="mt-1">
-                {selectedSession.compareceu ? (
+                {selectedSession.compareceu === true ? (
                   <span className="flex items-center gap-2 text-green-600">
                     <CheckCircle className="w-5 h-5" />
                     Compareceu
                   </span>
-                ) : (
+                ) : selectedSession.compareceu === false ? (
                   <span className="flex items-center gap-2 text-red-600">
                     <XCircle className="w-5 h-5" />
                     Não compareceu
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 text-yellow-600">
+                    <CalendarIcon className="w-5 h-5" />
+                    Agendado
                   </span>
                 )}
               </div>
@@ -305,6 +485,122 @@ export default function Dashboard() {
             </button>
           </div>
         )}
+      </Modal>
+
+      {/* Modal de Novo Agendamento */}
+      <Modal
+        isOpen={showAgendamentoModal}
+        onClose={() => {
+          setShowAgendamentoModal(false)
+          setAgendamentoForm({
+            paciente_id: '',
+            hora: '',
+            data: '',
+            isRecurring: false,
+            tipoRecorrencia: 'semanal',
+            dataFim: '',
+            criarPrevisao: false
+          })
+          setAgendamentoError('')
+        }}
+        title="Novo Agendamento"
+        size="md"
+      >
+        {agendamentoError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <span className="text-sm text-red-800">{agendamentoError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleCreateAgendamento} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data *
+            </label>
+            <input
+              type="date"
+              value={agendamentoForm.data}
+              onChange={(e) => setAgendamentoForm(prev => ({ ...prev, data: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+              readOnly
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Hora *
+            </label>
+            <input
+              type="time"
+              value={agendamentoForm.hora}
+              onChange={(e) => setAgendamentoForm(prev => ({ ...prev, hora: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Paciente *
+            </label>
+            <select
+              value={agendamentoForm.paciente_id}
+              onChange={(e) => setAgendamentoForm(prev => ({ ...prev, paciente_id: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="">Selecione um paciente</option>
+              {pacientes.map((paciente) => (
+                <option key={paciente.id} value={paciente.id}>
+                  {paciente.nome_completo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <RecurrenceOptions
+            isRecurring={agendamentoForm.isRecurring}
+            onRecurringChange={(value) => setAgendamentoForm(prev => ({ ...prev, isRecurring: value }))}
+            tipoRecorrencia={agendamentoForm.tipoRecorrencia}
+            onTipoRecorrenciaChange={(value) => setAgendamentoForm(prev => ({ ...prev, tipoRecorrencia: value }))}
+            dataFim={agendamentoForm.dataFim}
+            onDataFimChange={(value) => setAgendamentoForm(prev => ({ ...prev, dataFim: value }))}
+            dataInicio={agendamentoForm.data}
+            criarPrevisao={agendamentoForm.criarPrevisao}
+            onCriarPrevisaoChange={(value) => setAgendamentoForm(prev => ({ ...prev, criarPrevisao: value }))}
+          />
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAgendamentoModal(false)
+                setAgendamentoForm({
+                  paciente_id: '',
+                  hora: '',
+                  data: '',
+                  isRecurring: false,
+                  tipoRecorrencia: 'semanal',
+                  dataFim: '',
+                  criarPrevisao: false
+                })
+                setAgendamentoError('')
+              }}
+              className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={savingAgendamento}
+              className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
+            >
+              {savingAgendamento ? 'Salvando...' : 'Agendar'}
+            </button>
+          </div>
+        </form>
       </Modal>
     </Layout>
   )

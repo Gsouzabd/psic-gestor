@@ -5,8 +5,9 @@ import DadosPessoaisTab from '../components/DadosPessoaisTab'
 import AnamneseTab from '../components/AnamneseTab'
 import ProntuarioTab from '../components/ProntuarioTab'
 import PagamentosTab from '../components/PagamentosTab'
+import SessoesAgendadasTab from '../components/SessoesAgendadasTab'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, User, FileText, DollarSign, Trash2, UserCircle } from 'lucide-react'
+import { ArrowLeft, User, FileText, DollarSign, Trash2, UserCircle, Calendar } from 'lucide-react'
 
 export default function PacienteDetalhes() {
   const { id } = useParams()
@@ -22,7 +23,7 @@ export default function PacienteDetalhes() {
 
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab && ['dados', 'anamnese', 'prontuario', 'pagamentos'].includes(tab)) {
+    if (tab && ['dados', 'anamnese', 'prontuario', 'pagamentos', 'sessoes-agendadas'].includes(tab)) {
       setActiveTab(tab)
     }
   }, [searchParams])
@@ -112,6 +113,7 @@ export default function PacienteDetalhes() {
     { id: 'dados', label: 'Dados Pessoais', icon: UserCircle },
     { id: 'anamnese', label: 'Anamnese', icon: User },
     { id: 'prontuario', label: 'Prontuário', icon: FileText },
+    { id: 'sessoes-agendadas', label: 'Sessões Agendadas', icon: Calendar },
     { id: 'pagamentos', label: 'Pagamentos', icon: DollarSign },
   ]
 
@@ -192,6 +194,7 @@ export default function PacienteDetalhes() {
             {activeTab === 'dados' && <DadosPessoaisTab pacienteId={id} paciente={paciente} onUpdate={fetchPaciente} />}
             {activeTab === 'anamnese' && <AnamneseTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'prontuario' && <ProntuarioTab pacienteId={id} paciente={paciente} />}
+            {activeTab === 'sessoes-agendadas' && <SessoesAgendadasTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'pagamentos' && <PagamentosTab pacienteId={id} paciente={paciente} />}
           </div>
         </div>

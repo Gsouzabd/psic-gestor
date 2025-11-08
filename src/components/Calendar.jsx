@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Repeat } from 'lucide-react'
 import { 
   startOfMonth, 
   endOfMonth, 
@@ -23,7 +23,7 @@ const parseLocalDate = (dateString) => {
   return new Date(year, month - 1, day)
 }
 
-export default function Calendar({ sessions = [], onEventClick }) {
+export default function Calendar({ sessions = [], onEventClick, onDayClick }) {
   const [currentMonth, setCurrentMonth] = useState(new Date())
 
   const monthStart = startOfMonth(currentMonth)
@@ -77,7 +77,14 @@ export default function Calendar({ sessions = [], onEventClick }) {
           key={currentDay.toString()}
           className={`min-h-[60px] sm:min-h-[80px] md:min-h-[100px] border border-gray-200 p-1 sm:p-1.5 md:p-2 ${
             isCurrentMonth ? 'bg-white' : 'bg-gray-50'
-          } ${isDayToday ? 'ring-2 ring-primary' : ''}`}
+          } ${isDayToday ? 'ring-2 ring-primary' : ''} ${
+            onDayClick && isCurrentMonth ? 'cursor-pointer hover:bg-gray-50' : ''
+          }`}
+          onClick={() => {
+            if (onDayClick && isCurrentMonth && daySessions.length === 0) {
+              onDayClick(currentDay)
+            }
+          }}
         >
           <div className={`text-xs sm:text-sm font-medium mb-0.5 sm:mb-1 ${
             isDayToday ? 'text-primary font-bold' : 
@@ -86,20 +93,38 @@ export default function Calendar({ sessions = [], onEventClick }) {
             {format(currentDay, 'd')}
           </div>
           <div className="space-y-0.5 sm:space-y-1">
-            {daySessions.slice(0, 2).map((session) => (
-              <button
-                key={session.id}
-                onClick={() => onEventClick(session)}
-                className={`w-full text-left text-[10px] sm:text-xs px-1 sm:px-2 py-0.5 sm:py-1 rounded truncate transition ${
-                  session.compareceu 
-                    ? 'bg-primary text-white hover:bg-opacity-90' 
-                    : 'bg-secondary text-white hover:bg-opacity-90'
-                }`}
-              >
-                <span className="hidden sm:inline">{session.hora?.slice(0, 5)} - {session.paciente_nome}</span>
-                <span className="sm:hidden">{session.hora?.slice(0, 5)}</span>
-              </button>
-            ))}
+            {daySessions.slice(0, 2).map((session) => {
+              // Determinar cor baseado no status
+              let bgColor = 'bg-secondary text-white'
+              if (session.compareceu === true) {
+                bgColor = 'bg-primary text-white'
+              } else if (session.compareceu === false) {
+                bgColor = 'bg-red-500 text-white'
+              } else {
+                // null = agendado
+                bgColor = 'bg-yellow-500 text-white'
+              }
+
+              return (
+                <button
+                  key={session.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEventClick(session)
+                  }}
+                  className={`w-full text-left text-[10px] sm:text-xs px-1 sm:px-2 py-0.5 sm:py-1 rounded truncate transition hover:bg-opacity-90 ${bgColor} relative ${
+                    session.recorrencia_id ? 'border-l-2 border-blue-400' : ''
+                  }`}
+                  title={session.recorrencia_id ? 'Agendamento recorrente' : ''}
+                >
+                  {session.recorrencia_id && (
+                    <Repeat className="absolute top-0 right-0 w-2 h-2 text-blue-200 opacity-75" />
+                  )}
+                  <span className="hidden sm:inline">{session.hora?.slice(0, 5)} - {session.paciente_nome}</span>
+                  <span className="sm:hidden">{session.hora?.slice(0, 5)}</span>
+                </button>
+              )
+            })}
             {daySessions.length > 2 && (
               <div className="text-[10px] sm:text-xs text-gray-500 px-1 sm:px-2">
                 +{daySessions.length - 2}

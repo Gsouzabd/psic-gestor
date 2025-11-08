@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { DollarSign, CheckCircle, XCircle, Filter, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { marcarComparecimento } from '../utils/sessoesAgendadas'
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -20,7 +21,8 @@ export default function PagamentosTab({ pacienteId, paciente }) {
     totalSessoes: 0,
     totalReceber: 0,
     totalRecebido: 0,
-    saldoAberto: 0
+    saldoAberto: 0,
+    valorPrevisto: 0
   })
 
   useEffect(() => {
@@ -49,18 +51,28 @@ export default function PagamentosTab({ pacienteId, paciente }) {
   }
 
   const calcularResumo = () => {
-    const totalSessoes = pagamentos.length
-    const totalReceber = pagamentos.reduce((sum, p) => sum + parseFloat(p.valor_final || 0), 0)
-    const totalRecebido = pagamentos
+    // Separar pagamentos previstos dos reais
+    const pagamentosPrevistos = pagamentos.filter(p => p.previsao)
+    const pagamentosReais = pagamentos.filter(p => !p.previsao)
+    
+    // Pagamentos previstos que ainda não foram pagos (excluir os que foram marcados como pagos)
+    const pagamentosPrevistosNaoPagos = pagamentosPrevistos.filter(p => !p.pago)
+    
+    const totalSessoes = pagamentosReais.length
+    const totalReceber = pagamentosReais.reduce((sum, p) => sum + parseFloat(p.valor_final || 0), 0)
+    const totalRecebido = pagamentosReais
       .filter(p => p.pago)
       .reduce((sum, p) => sum + parseFloat(p.valor_final || 0), 0)
     const saldoAberto = totalReceber - totalRecebido
+    // Valor previsto apenas dos pagamentos previstos que ainda não foram pagos
+    const valorPrevisto = pagamentosPrevistosNaoPagos.reduce((sum, p) => sum + parseFloat(p.valor_final || 0), 0)
 
     setResumo({
       totalSessoes,
       totalReceber,
       totalRecebido,
-      saldoAberto
+      saldoAberto,
+      valorPrevisto
     })
   }
 
@@ -79,7 +91,37 @@ export default function PagamentosTab({ pacienteId, paciente }) {
     }
   }
 
+  const handleMarcarComparecimentoPagamento = async (pagamento, compareceu) => {
+    try {
+      // Se o pagamento tem sessao_agendada_id, usar a função marcarComparecimento
+      if (pagamento.sessao_agendada_id) {
+        const { prontuario, error } = await marcarComparecimento(pagamento.sessao_agendada_id, compareceu)
+        if (error) {
+          alert('Erro ao marcar comparecimento. Tente novamente.')
+          return
+        }
+        if (compareceu && prontuario) {
+          // Prontuário foi criado automaticamente
+        }
+      } else {
+        // Se não tem sessao_agendada_id, apenas atualizar o pagamento
+        const { error } = await supabase
+          .from('pagamentos')
+          .update({ compareceu: compareceu })
+          .eq('id', pagamento.id)
+
+        if (error) throw error
+      }
+
+      fetchPagamentos()
+    } catch (error) {
+      console.error('Erro ao marcar comparecimento:', error)
+      alert('Erro ao marcar comparecimento. Tente novamente.')
+    }
+  }
+
   const pagamentosFiltrados = pagamentos.filter(p => {
+    // Incluir todos os pagamentos (previstos e reais)
     if (filtro === 'pagos') return p.pago
     if (filtro === 'pendentes') return !p.pago
     return true
@@ -166,7 +208,7 @@ export default function PagamentosTab({ pacienteId, paciente }) {
   return (
     <div className="space-y-6">
       {/* Resumo Financeiro */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-3 sm:p-4 border border-blue-200">
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="p-1.5 sm:p-2 bg-blue-600 rounded-lg flex-shrink-0">
@@ -211,6 +253,18 @@ export default function PagamentosTab({ pacienteId, paciente }) {
             <div className="min-w-0 flex-1">
               <p className="text-xs sm:text-sm text-yellow-800 font-medium">Saldo em Aberto</p>
               <p className="text-lg sm:text-xl lg:text-2xl font-bold text-yellow-900">R$ {resumo.saldoAberto.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl p-3 sm:p-4 border border-indigo-200">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="p-1.5 sm:p-2 bg-indigo-600 rounded-lg flex-shrink-0">
+              <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm text-indigo-800 font-medium">Valor Previsto</p>
+              <p className="text-lg sm:text-xl lg:text-2xl font-bold text-indigo-900">R$ {resumo.valorPrevisto.toFixed(2)}</p>
             </div>
           </div>
         </div>
@@ -332,7 +386,23 @@ export default function PagamentosTab({ pacienteId, paciente }) {
                                 ) : pagamento.compareceu === false ? (
                                   <XCircle className="w-4 h-4 text-red-600" />
                                 ) : (
-                                  <Calendar className="w-4 h-4 text-yellow-600" />
+                                  // Se compareceu é NULL (agendado), mostrar botões para marcar
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => handleMarcarComparecimentoPagamento(pagamento, true)}
+                                      className="p-1 hover:bg-green-50 rounded transition"
+                                      title="Marcar como compareceu"
+                                    >
+                                      <CheckCircle className="w-4 h-4 text-green-600" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleMarcarComparecimentoPagamento(pagamento, false)}
+                                      className="p-1 hover:bg-red-50 rounded transition"
+                                      title="Marcar como não compareceu"
+                                    >
+                                      <XCircle className="w-4 h-4 text-red-600" />
+                                    </button>
+                                  </div>
                                 )}
                               </td>
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">

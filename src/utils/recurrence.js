@@ -29,7 +29,7 @@ export function calculateRecurrenceDates(dataInicio, tipoRecorrencia, dataFim) {
 }
 
 /**
- * Gera todos os agendamentos recorrentes e cria prontuários e pagamentos
+ * Gera todos os agendamentos recorrentes e cria sessões agendadas e pagamentos
  * @param {Object} params
  * @param {string} params.dataInicio - Data inicial no formato YYYY-MM-DD
  * @param {string} params.hora - Hora no formato HH:mm
@@ -39,7 +39,7 @@ export function calculateRecurrenceDates(dataInicio, tipoRecorrencia, dataFim) {
  * @param {string} params.recorrenciaId - ID da recorrência
  * @param {number} params.valorSessao - Valor da sessão
  * @param {boolean} params.criarPrevisao - Se true, cria pagamentos com previsao=true
- * @returns {Promise<{prontuarios: string[], errors: Error[]}>}
+ * @returns {Promise<{sessoesAgendadas: string[], errors: Error[]}>}
  */
 export async function generateRecurringAppointments({
   dataInicio,
@@ -52,50 +52,48 @@ export async function generateRecurringAppointments({
   criarPrevisao = false
 }) {
   const dates = calculateRecurrenceDates(dataInicio, tipoRecorrencia, dataFim)
-  const prontuarioIds = []
+  const sessoesAgendadasIds = []
   const errors = []
 
   for (let i = 0; i < dates.length; i++) {
     const data = dates[i]
-    const isOriginal = i === 0
 
     try {
-      // Criar prontuário
-      const { data: prontuario, error: prontuarioError } = await supabase
-        .from('prontuarios')
+      // Criar sessão agendada
+      const { data: sessaoAgendada, error: sessaoError } = await supabase
+        .from('sessoes_agendadas')
         .insert([
           {
             paciente_id: pacienteId,
             data: data,
             hora: hora,
-            compareceu: null, // Agendado
+            compareceu: null, // Ainda não foi marcado
             anotacoes: '',
-            recorrencia_id: recorrenciaId,
-            ocorrencia_original: isOriginal
+            recorrencia_id: recorrenciaId
           }
         ])
         .select()
         .single()
 
-      if (prontuarioError) {
-        errors.push(new Error(`Erro ao criar prontuário para ${data}: ${prontuarioError.message}`))
+      if (sessaoError) {
+        errors.push(new Error(`Erro ao criar sessão agendada para ${data}: ${sessaoError.message}`))
         continue
       }
 
-      prontuarioIds.push(prontuario.id)
+      sessoesAgendadasIds.push(sessaoAgendada.id)
 
-      // Criar pagamento vinculado apenas se criarPrevisao for true
+      // Criar pagamento previsto vinculado apenas se criarPrevisao for true
       if (criarPrevisao) {
         const { error: pagamentoError } = await supabase
           .from('pagamentos')
           .insert([
             {
-              prontuario_id: prontuario.id,
+              sessao_agendada_id: sessaoAgendada.id,
               paciente_id: pacienteId,
               data: data,
               valor_sessao: valorSessao,
               desconto: 0,
-              compareceu: null, // Agendado
+              compareceu: null, // Ainda não foi marcado
               pago: false,
               previsao: true // Pagamento previsto
             }
@@ -110,7 +108,7 @@ export async function generateRecurringAppointments({
     }
   }
 
-  return { prontuarios: prontuarioIds, errors }
+  return { sessoesAgendadas: sessoesAgendadasIds, errors }
 }
 
 /**
@@ -122,7 +120,7 @@ export async function generateRecurringAppointments({
 export async function deleteFutureRecurringAppointments(recorrenciaId, dataLimite = null) {
   const errors = []
   let query = supabase
-    .from('prontuarios')
+    .from('sessoes_agendadas')
     .select('id')
     .eq('recorrencia_id', recorrenciaId)
 
@@ -130,44 +128,69 @@ export async function deleteFutureRecurringAppointments(recorrenciaId, dataLimit
     query = query.gte('data', dataLimite)
   }
 
-  const { data: prontuarios, error: fetchError } = await query
+  const { data: sessoesAgendadas, error: fetchError } = await query
 
   if (fetchError) {
     return { deleted: 0, errors: [fetchError] }
   }
 
-  if (!prontuarios || prontuarios.length === 0) {
+  if (!sessoesAgendadas || sessoesAgendadas.length === 0) {
     return { deleted: 0, errors: [] }
   }
 
-  const prontuarioIds = prontuarios.map(p => p.id)
+  const sessoesAgendadasIds = sessoesAgendadas.map(s => s.id)
   let deletedCount = 0
 
-  // Deletar pagamentos primeiro (devido à foreign key)
-  for (const prontuarioId of prontuarioIds) {
-    const { error: pagamentoError } = await supabase
-      .from('pagamentos')
-      .delete()
-      .eq('prontuario_id', prontuarioId)
+  if (sessoesAgendadasIds.length === 0) {
+    return { deleted: 0, errors: [] }
+  }
 
-    if (pagamentoError) {
-      errors.push(pagamentoError)
-    } else {
-      deletedCount++
+  // Deletar pagamentos primeiro (devido à foreign key)
+  // Usar delete em lote para melhor performance
+  const { error: pagamentoError } = await supabase
+    .from('pagamentos')
+    .delete()
+    .in('sessao_agendada_id', sessoesAgendadasIds)
+
+  if (pagamentoError) {
+    errors.push(pagamentoError)
+    // Tentar deletar individualmente se o delete em lote falhar
+    for (const sessaoId of sessoesAgendadasIds) {
+      const { error: individualError } = await supabase
+        .from('pagamentos')
+        .delete()
+        .eq('sessao_agendada_id', sessaoId)
+      
+      if (individualError) {
+        errors.push(individualError)
+      }
     }
   }
 
-  // Deletar prontuários
-  const { error: prontuarioError } = await supabase
-    .from('prontuarios')
+  // Deletar sessões agendadas
+  const { error: sessaoError } = await supabase
+    .from('sessoes_agendadas')
     .delete()
-    .in('id', prontuarioIds)
+    .in('id', sessoesAgendadasIds)
 
-  if (prontuarioError) {
-    errors.push(prontuarioError)
+  if (sessaoError) {
+    errors.push(sessaoError)
+    // Tentar deletar individualmente se o delete em lote falhar
+    for (const sessaoId of sessoesAgendadasIds) {
+      const { error: individualError } = await supabase
+        .from('sessoes_agendadas')
+        .delete()
+        .eq('id', sessaoId)
+      
+      if (individualError) {
+        errors.push(individualError)
+      } else {
+        deletedCount++
+      }
+    }
   } else {
-    // Contar quantos foram deletados (assumindo que todos foram deletados se não houve erro)
-    deletedCount = prontuarioIds.length
+    // Se não houve erro, todos foram deletados
+    deletedCount = sessoesAgendadasIds.length
   }
 
   return { deleted: deletedCount, errors }

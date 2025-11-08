@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Calendar, Clock, DollarSign, AlertCircle } from 'lucide-react'
+import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { marcarComparecimento } from '../utils/sessoesAgendadas'
+import { deleteFutureRecurringAppointments } from '../utils/recurrence'
+import RecurrenceActionModal from './RecurrenceActionModal'
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -14,6 +17,8 @@ const parseLocalDate = (dateString) => {
 export default function SessoesAgendadasTab({ pacienteId, paciente }) {
   const [loading, setLoading] = useState(true)
   const [sessoesAgendadas, setSessoesAgendadas] = useState([])
+  const [showRecurrenceModal, setShowRecurrenceModal] = useState(false)
+  const [pendingSessao, setPendingSessao] = useState(null)
 
   useEffect(() => {
     fetchSessoesAgendadas()
@@ -21,28 +26,56 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
 
   const fetchSessoesAgendadas = async () => {
     try {
-      // Buscar apenas prontuários agendados (compareceu = null)
-      const { data: prontuarios, error } = await supabase
-        .from('prontuarios')
+      // Buscar sessões agendadas (compareceu pode ser null, true ou false)
+      const { data: sessoes, error } = await supabase
+        .from('sessoes_agendadas')
         .select('*, recorrencia_id')
         .eq('paciente_id', pacienteId)
-        .is('compareceu', null)
         .order('data', { ascending: true })
         .order('hora', { ascending: true })
 
       if (error) throw error
 
-      // Para cada prontuário, verificar se tem pagamento vinculado
+      // Para cada sessão, verificar se tem pagamento vinculado
       const sessoesComPagamento = await Promise.all(
-        (prontuarios || []).map(async (prontuario) => {
+        (sessoes || []).map(async (sessao) => {
+          // Se compareceu = true, verificar se há pagamento vinculado ao prontuário criado
+          if (sessao.compareceu === true) {
+            // Buscar prontuário criado a partir desta sessão agendada
+            const { data: prontuario } = await supabase
+              .from('prontuarios')
+              .select('id')
+              .eq('paciente_id', sessao.paciente_id)
+              .eq('data', sessao.data)
+              .eq('hora', sessao.hora)
+              .eq('compareceu', true)
+              .single()
+
+            if (prontuario) {
+              // Verificar se há pagamento vinculado ao prontuário
+              const { data: pagamento } = await supabase
+                .from('pagamentos')
+                .select('id, previsao')
+                .eq('prontuario_id', prontuario.id)
+                .single()
+
+              return {
+                ...sessao,
+                temPagamento: !!pagamento,
+                pagamentoPrevisao: pagamento?.previsao || false
+              }
+            }
+          }
+
+          // Para sessões não comparecidas ou ainda não marcadas, verificar pagamento previsto
           const { data: pagamento } = await supabase
             .from('pagamentos')
             .select('id, previsao')
-            .eq('prontuario_id', prontuario.id)
+            .eq('sessao_agendada_id', sessao.id)
             .single()
 
           return {
-            ...prontuario,
+            ...sessao,
             temPagamento: !!pagamento,
             pagamentoPrevisao: pagamento?.previsao || false
           }
@@ -69,12 +102,12 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
         .from('pagamentos')
         .insert([
           {
-            prontuario_id: sessao.id,
+            sessao_agendada_id: sessao.id,
             paciente_id: pacienteId,
             data: sessao.data,
             valor_sessao: valorSessao,
             desconto: 0,
-            compareceu: null, // Agendado
+            compareceu: null, // Ainda não foi marcado
             pago: false,
             previsao: false // Pagamento real, não previsto
           }
@@ -87,6 +120,105 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
     } catch (error) {
       console.error('Erro ao criar pagamento:', error)
       alert('Erro ao criar pagamento. Tente novamente.')
+    }
+  }
+
+  const handleMarcarComparecimento = async (sessao, compareceu) => {
+    try {
+      const { prontuario, error } = await marcarComparecimento(sessao.id, compareceu)
+
+      if (error) {
+        alert('Erro ao marcar comparecimento. Tente novamente.')
+        return
+      }
+
+      if (compareceu && prontuario) {
+        alert('Comparecimento marcado! Prontuário criado automaticamente.')
+      } else {
+        alert('Comparecimento marcado com sucesso!')
+      }
+
+      fetchSessoesAgendadas()
+    } catch (error) {
+      console.error('Erro ao marcar comparecimento:', error)
+      alert('Erro ao marcar comparecimento. Tente novamente.')
+    }
+  }
+
+  const handleDeleteClick = (sessao) => {
+    // Se a sessão faz parte de uma recorrência, mostrar modal de escolha
+    if (sessao.recorrencia_id) {
+      setPendingSessao(sessao)
+      setShowRecurrenceModal(true)
+    } else {
+      // Se não é recorrente, deletar diretamente
+      handleDeleteSessao(sessao.id, false)
+    }
+  }
+
+  const handleDeleteRecurrence = async (deleteAllSeries) => {
+    if (!pendingSessao) return
+
+    const sessaoId = pendingSessao.id
+    const recorrenciaId = pendingSessao.recorrencia_id
+
+    if (deleteAllSeries) {
+      // Deletar toda a série
+      const { deleted, errors } = await deleteFutureRecurringAppointments(recorrenciaId, null)
+      
+      if (errors.length > 0) {
+        alert('Erro ao excluir sessões. Tente novamente.')
+        console.error('Erros ao deletar:', errors)
+      } else {
+        alert(`${deleted} sessão(ões) excluída(s) com sucesso!`)
+      }
+    } else {
+      // Deletar apenas esta ocorrência
+      await handleDeleteSessao(sessaoId, true)
+    }
+
+    setShowRecurrenceModal(false)
+    setPendingSessao(null)
+    fetchSessoesAgendadas()
+  }
+
+  const handleDeleteSessao = async (sessaoId, isRecurring = false) => {
+    if (!confirm('Tem certeza que deseja excluir esta sessão agendada?')) {
+      return
+    }
+
+    try {
+      // Se é recorrente e estamos deletando apenas uma ocorrência, remover o vínculo com a recorrência
+      if (isRecurring) {
+        const { error: updateError } = await supabase
+          .from('sessoes_agendadas')
+          .update({ recorrencia_id: null })
+          .eq('id', sessaoId)
+
+        if (updateError) throw updateError
+      }
+
+      // Deletar pagamentos vinculados primeiro
+      const { error: pagamentoError } = await supabase
+        .from('pagamentos')
+        .delete()
+        .eq('sessao_agendada_id', sessaoId)
+
+      if (pagamentoError) throw pagamentoError
+
+      // Deletar sessão agendada
+      const { error: sessaoError } = await supabase
+        .from('sessoes_agendadas')
+        .delete()
+        .eq('id', sessaoId)
+
+      if (sessaoError) throw sessaoError
+
+      alert('Sessão excluída com sucesso!')
+      fetchSessoesAgendadas()
+    } catch (error) {
+      console.error('Erro ao deletar sessão:', error)
+      alert('Erro ao deletar sessão. Tente novamente.')
     }
   }
 
@@ -148,19 +280,55 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  {sessao.temPagamento ? (
-                    <div className="flex flex-col items-end gap-2">
-                      {sessao.pagamentoPrevisao ? (
-                        <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
-                          Pagamento previsto
-                        </span>
-                      ) : (
-                        <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                          Pagamento criado
-                        </span>
-                      )}
+                <div className="flex flex-col items-end gap-2">
+                  {/* Status de comparecimento */}
+                  {sessao.compareceu === true ? (
+                    <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" />
+                      Compareceu
+                    </span>
+                  ) : sessao.compareceu === false ? (
+                    <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium flex items-center gap-1">
+                      <XCircle className="w-3 h-3" />
+                      Não Compareceu
+                    </span>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleMarcarComparecimento(sessao, true)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Compareceu
+                      </button>
+                      <button
+                        onClick={() => handleMarcarComparecimento(sessao, false)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-medium"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        Não Compareceu
+                      </button>
                     </div>
+                  )}
+
+                  {/* Status de pagamento */}
+                  {/* Se compareceu = true, não mostrar botão criar pagamento (já foi criado automaticamente) */}
+                  {sessao.compareceu === true ? (
+                    sessao.temPagamento ? (
+                      <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                        Pagamento criado
+                      </span>
+                    ) : null
+                  ) : sessao.temPagamento ? (
+                    sessao.pagamentoPrevisao ? (
+                      <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                        Pagamento previsto
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                        Pagamento criado
+                      </span>
+                    )
                   ) : (
                     <button
                       onClick={() => handleCriarPagamento(sessao)}
@@ -170,12 +338,33 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                       Criar pagamento
                     </button>
                   )}
+
+                  {/* Botão de excluir */}
+                  <button
+                    onClick={() => handleDeleteClick(sessao)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-medium"
+                    title="Excluir sessão"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Excluir
+                  </button>
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Modal de ação de recorrência */}
+      <RecurrenceActionModal
+        isOpen={showRecurrenceModal}
+        onClose={() => {
+          setShowRecurrenceModal(false)
+          setPendingSessao(null)
+        }}
+        onConfirm={handleDeleteRecurrence}
+        action="delete"
+      />
     </div>
   )
 }

@@ -2,9 +2,6 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Modal from './Modal'
 import SessionCard from './SessionCard'
-import RecurrenceOptions from './RecurrenceOptions'
-import RecurrenceActionModal from './RecurrenceActionModal'
-import { generateRecurringAppointments, deleteFutureRecurringAppointments } from '../utils/recurrence'
 import { Plus, AlertCircle, CheckCircle } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -15,21 +12,13 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
   const [editingSessao, setEditingSessao] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [showRecurrenceModal, setShowRecurrenceModal] = useState(false)
-  const [recurrenceAction, setRecurrenceAction] = useState(null) // 'edit' ou 'delete'
-  const [pendingSessao, setPendingSessao] = useState(null)
-  const [editAllSeries, setEditAllSeries] = useState(false)
   const [formData, setFormData] = useState({
     data: '',
     hora: '',
-    compareceu: null, // null = agendado, true = compareceu, false = não compareceu
+    compareceu: true, // true = compareceu, false = não compareceu (agendamentos não são criados aqui)
     anotacoes: '',
     valor_sessao: paciente.valor_sessao || '',
-    desconto: '0',
-    isRecurring: false,
-    tipoRecorrencia: 'semanal',
-    dataFim: '',
-    criarPrevisao: false
+    desconto: '0'
   })
 
   useEffect(() => {
@@ -38,10 +27,12 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
 
   const fetchSessoes = async () => {
     try {
+      // Buscar apenas prontuários de sessões que já aconteceram (compareceu != null)
       const { data, error } = await supabase
         .from('prontuarios')
-        .select('*, recorrencia_id')
+        .select('*')
         .eq('paciente_id', pacienteId)
+        .not('compareceu', 'is', null) // Apenas sessões com compareceu = true ou false
         .order('data', { ascending: false })
         .order('hora', { ascending: false })
 
@@ -64,14 +55,6 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
 
   const handleEdit = async (sessao) => {
     try {
-      // Se a sessão tem recorrência, mostrar modal de escolha
-      if (sessao.recorrencia_id) {
-        setPendingSessao(sessao)
-        setRecurrenceAction('edit')
-        setShowRecurrenceModal(true)
-        return
-      }
-
       // Buscar pagamento vinculado
       const { data: pagamento } = await supabase
         .from('pagamentos')
@@ -86,66 +69,13 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
         compareceu: sessao.compareceu ?? true,
         anotacoes: sessao.anotacoes || '',
         valor_sessao: pagamento?.valor_sessao || paciente.valor_sessao || '',
-        desconto: pagamento?.desconto || '0',
-        isRecurring: false,
-        tipoRecorrencia: 'semanal',
-        dataFim: '',
-        criarPrevisao: false
+        desconto: pagamento?.desconto || '0'
       })
       setShowNewModal(true)
       setError('')
     } catch (error) {
       console.error('Erro ao carregar dados da sessão:', error)
       setError('Erro ao carregar dados da sessão.')
-    }
-  }
-
-  const handleRecurrenceAction = async (editAllSeries) => {
-    if (!pendingSessao) return
-
-    const sessao = pendingSessao
-    const action = recurrenceAction
-    setPendingSessao(null)
-    setRecurrenceAction(null)
-    setShowRecurrenceModal(false)
-
-    if (action === 'edit') {
-      setEditAllSeries(editAllSeries)
-      
-      if (editAllSeries) {
-        // Editar toda a série - implementar lógica futura
-        // Por enquanto, apenas editar a ocorrência atual
-        setError('Edição de toda a série ainda não implementada. Editando apenas esta ocorrência.')
-      }
-      
-      // Carregar dados da sessão para edição
-      try {
-        const { data: pagamento } = await supabase
-          .from('pagamentos')
-          .select('*')
-          .eq('prontuario_id', sessao.id)
-          .single()
-
-        setEditingSessao(sessao)
-        setFormData({
-          data: sessao.data,
-          hora: sessao.hora || '',
-          compareceu: sessao.compareceu ?? true,
-          anotacoes: sessao.anotacoes || '',
-          valor_sessao: pagamento?.valor_sessao || paciente.valor_sessao || '',
-          desconto: pagamento?.desconto || '0',
-          isRecurring: false,
-          tipoRecorrencia: 'semanal',
-          dataFim: ''
-        })
-        setShowNewModal(true)
-        setError('')
-      } catch (error) {
-        console.error('Erro ao carregar dados da sessão:', error)
-        setError('Erro ao carregar dados da sessão.')
-      }
-    } else if (action === 'delete') {
-      await handleDeleteRecurrence(sessao, editAllSeries)
     }
   }
 
@@ -160,35 +90,16 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
       const dataFormatada = formData.data // Já está no formato YYYY-MM-DD
 
       if (editingSessao) {
-        if (editAllSeries && editingSessao.recorrencia_id) {
-          // Editar toda a série - implementação futura
-          // Por enquanto, apenas editar a ocorrência atual e remover vínculo
-          setError('Edição de toda a série ainda não implementada. Editando apenas esta ocorrência e desvinculando da série.')
-          
-          // Remover vínculo com recorrência
-          await supabase
-            .from('prontuarios')
-            .update({ recorrencia_id: null })
-            .eq('id', editingSessao.id)
-        }
-
         // Atualizar prontuário existente
-        const updateData = {
-          data: dataFormatada,
-          hora: formData.hora,
-          compareceu: formData.compareceu,
-          anotacoes: formData.anotacoes,
-          updated_at: new Date().toISOString()
-        }
-
-        // Se não for editar toda série e tiver recorrência, remover vínculo
-        if (!editAllSeries && editingSessao.recorrencia_id) {
-          updateData.recorrencia_id = null
-        }
-
         const { error: prontuarioError } = await supabase
           .from('prontuarios')
-          .update(updateData)
+          .update({
+            data: dataFormatada,
+            hora: formData.hora,
+            compareceu: formData.compareceu,
+            anotacoes: formData.anotacoes,
+            updated_at: new Date().toISOString()
+          })
           .eq('id', editingSessao.id)
 
         if (prontuarioError) throw prontuarioError
@@ -207,101 +118,52 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
 
         if (pagamentoError) throw pagamentoError
       } else {
-        // Validar recorrência se marcada
-        if (formData.isRecurring && (!formData.tipoRecorrencia || !formData.dataFim)) {
-          setError('Para agendamentos recorrentes, preencha o tipo e a data final.')
-          setSaving(false)
-          return
-        }
-
+        // Criar novo prontuário (apenas sessões que já aconteceram)
         const valorSessao = parseFloat(formData.valor_sessao) || 0
 
-        if (formData.isRecurring) {
-          // Criar recorrência
-          const { data: recorrencia, error: recorrenciaError } = await supabase
-            .from('recorrencias')
-            .insert([
-              {
-                paciente_id: pacienteId,
-                data_inicio: dataFormatada,
-                hora: formData.hora,
-                tipo_recorrencia: formData.tipoRecorrencia,
-                data_fim: formData.dataFim,
-                ativo: true
-              }
-            ])
-            .select()
-            .single()
+        const { data: prontuario, error: prontuarioError } = await supabase
+          .from('prontuarios')
+          .insert([
+            {
+              paciente_id: pacienteId,
+              data: dataFormatada,
+              hora: formData.hora,
+              compareceu: formData.compareceu,
+              anotacoes: formData.anotacoes
+            }
+          ])
+          .select()
+          .single()
 
-          if (recorrenciaError) throw recorrenciaError
+        if (prontuarioError) throw prontuarioError
 
-          // Gerar todos os agendamentos recorrentes
-          const { prontuarios, errors } = await generateRecurringAppointments({
-            dataInicio: dataFormatada,
-            hora: formData.hora,
-            tipoRecorrencia: formData.tipoRecorrencia,
-            dataFim: formData.dataFim,
-            pacienteId: pacienteId,
-            recorrenciaId: recorrencia.id,
-            valorSessao: valorSessao,
-            criarPrevisao: formData.criarPrevisao || false
-          })
+        // Criar pagamento vinculado
+        const { error: pagamentoError } = await supabase
+          .from('pagamentos')
+          .insert([
+            {
+              prontuario_id: prontuario.id,
+              paciente_id: pacienteId,
+              data: dataFormatada,
+              valor_sessao: valorSessao,
+              desconto: parseFloat(formData.desconto) || 0,
+              compareceu: formData.compareceu,
+              pago: false
+            }
+          ])
 
-          if (errors.length > 0) {
-            console.error('Erros ao criar alguns agendamentos:', errors)
-            setError(`Agendamentos criados, mas alguns erros ocorreram: ${errors.length} erro(s)`)
-          }
-        } else {
-          // Criar novo prontuário único
-          const { data: prontuario, error: prontuarioError } = await supabase
-            .from('prontuarios')
-            .insert([
-              {
-                paciente_id: pacienteId,
-                data: dataFormatada,
-                hora: formData.hora,
-                compareceu: formData.compareceu,
-                anotacoes: formData.anotacoes
-              }
-            ])
-            .select()
-            .single()
-
-          if (prontuarioError) throw prontuarioError
-
-          // Criar pagamento vinculado
-          const { error: pagamentoError } = await supabase
-            .from('pagamentos')
-            .insert([
-              {
-                prontuario_id: prontuario.id,
-                paciente_id: pacienteId,
-                data: dataFormatada,
-                valor_sessao: valorSessao,
-                desconto: parseFloat(formData.desconto) || 0,
-                compareceu: formData.compareceu,
-                pago: false
-              }
-            ])
-
-          if (pagamentoError) throw pagamentoError
-        }
+        if (pagamentoError) throw pagamentoError
       }
 
       setShowNewModal(false)
       setEditingSessao(null)
-      setEditAllSeries(false)
       setFormData({
         data: '',
         hora: '',
-        compareceu: null,
+        compareceu: true,
         anotacoes: '',
         valor_sessao: paciente.valor_sessao || '',
-        desconto: '0',
-        isRecurring: false,
-        tipoRecorrencia: 'semanal',
-        dataFim: '',
-        criarPrevisao: false
+        desconto: '0'
       })
       fetchSessoes()
     } catch (error) {
@@ -313,25 +175,10 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
   }
 
   const handleDelete = async (sessaoId) => {
-    // Buscar a sessão para verificar se tem recorrência
-    const sessao = sessoes.find(s => s.id === sessaoId)
-    
-    if (sessao?.recorrencia_id) {
-      setPendingSessao(sessao)
-      setRecurrenceAction('delete')
-      setShowRecurrenceModal(true)
-      return
-    }
-
-    // Sessão sem recorrência - deletar normalmente
     if (!confirm('Tem certeza que deseja excluir esta sessão e seu pagamento associado?')) {
       return
     }
 
-    await deleteSingleSession(sessaoId)
-  }
-
-  const deleteSingleSession = async (sessaoId) => {
     try {
       // Deletar pagamento primeiro
       await supabase
@@ -350,57 +197,6 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
     } catch (error) {
       console.error('Erro ao deletar sessão:', error)
       alert('Erro ao deletar sessão')
-    }
-  }
-
-  const handleDeleteRecurrence = async (sessao, deleteAllSeries) => {
-    if (!deleteAllSeries) {
-      // Deletar apenas esta ocorrência - remover vínculo com recorrência
-      if (!confirm('Tem certeza que deseja excluir esta ocorrência? Ela será desvinculada da série recorrente.')) {
-        return
-      }
-
-      try {
-        // Remover vínculo com recorrência antes de deletar
-        await supabase
-          .from('prontuarios')
-          .update({ recorrencia_id: null })
-          .eq('id', sessao.id)
-
-        await deleteSingleSession(sessao.id)
-      } catch (error) {
-        console.error('Erro ao deletar ocorrência:', error)
-        alert('Erro ao deletar ocorrência')
-      }
-    } else {
-      // Deletar toda a série
-      if (!confirm('Tem certeza que deseja excluir TODA a série de agendamentos recorrentes? Esta ação não pode ser desfeita.')) {
-        return
-      }
-
-      try {
-        // Deletar todos os agendamentos futuros da recorrência
-        const { deleted, errors } = await deleteFutureRecurringAppointments(
-          sessao.recorrencia_id,
-          sessao.data // Deletar apenas agendamentos a partir desta data
-        )
-
-        if (errors.length > 0) {
-          console.error('Erros ao deletar agendamentos:', errors)
-          alert(`Alguns agendamentos não puderam ser deletados: ${errors.length} erro(s)`)
-        }
-
-        // Marcar recorrência como inativa
-        await supabase
-          .from('recorrencias')
-          .update({ ativo: false })
-          .eq('id', sessao.recorrencia_id)
-
-        fetchSessoes()
-      } catch (error) {
-        console.error('Erro ao deletar série:', error)
-        alert('Erro ao deletar série de agendamentos')
-      }
     }
   }
 
@@ -522,17 +318,6 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
                 <input
                   type="radio"
                   name="compareceu"
-                  value="null"
-                  checked={formData.compareceu === null}
-                  onChange={() => setFormData(prev => ({ ...prev, compareceu: null }))}
-                  className="w-4 h-4 text-primary border-gray-300 focus:ring-primary"
-                />
-                <span className="text-sm text-gray-700">Agendado</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="compareceu"
                   value="true"
                   checked={formData.compareceu === true}
                   onChange={() => setFormData(prev => ({ ...prev, compareceu: true }))}
@@ -611,32 +396,6 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
             </div>
           </div>
 
-          {!editingSessao && (
-            <RecurrenceOptions
-              isRecurring={formData.isRecurring}
-              onRecurringChange={(value) => {
-                // Calcular data final padrão se não existir
-                if (value && !formData.dataFim && formData.data) {
-                  const defaultEndDate = new Date(formData.data)
-                  defaultEndDate.setMonth(defaultEndDate.getMonth() + 3)
-                  setFormData(prev => ({ 
-                    ...prev, 
-                    isRecurring: value,
-                    dataFim: format(defaultEndDate, 'yyyy-MM-dd')
-                  }))
-                } else {
-                  setFormData(prev => ({ ...prev, isRecurring: value }))
-                }
-              }}
-              tipoRecorrencia={formData.tipoRecorrencia}
-              onTipoRecorrenciaChange={(value) => setFormData(prev => ({ ...prev, tipoRecorrencia: value }))}
-              dataFim={formData.dataFim}
-              onDataFimChange={(value) => setFormData(prev => ({ ...prev, dataFim: value }))}
-              dataInicio={formData.data}
-              criarPrevisao={formData.criarPrevisao}
-              onCriarPrevisaoChange={(value) => setFormData(prev => ({ ...prev, criarPrevisao: value }))}
-            />
-          )}
 
           <div className="flex gap-3 pt-4">
             <button
@@ -647,13 +406,10 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
                 setFormData({
                   data: '',
                   hora: '',
-                  compareceu: null,
+                  compareceu: true,
                   anotacoes: '',
                   valor_sessao: paciente.valor_sessao || '',
-                  desconto: '0',
-                  isRecurring: false,
-                  tipoRecorrencia: 'semanal',
-                  dataFim: ''
+                  desconto: '0'
                 })
                 setError('')
               }}
@@ -672,17 +428,6 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
         </form>
       </Modal>
 
-      {/* Modal de Ação de Recorrência */}
-      <RecurrenceActionModal
-        isOpen={showRecurrenceModal}
-        onClose={() => {
-          setShowRecurrenceModal(false)
-          setPendingSessao(null)
-          setRecurrenceAction(null)
-        }}
-        onConfirm={handleRecurrenceAction}
-        action={recurrenceAction || 'edit'}
-      />
     </div>
   )
 }

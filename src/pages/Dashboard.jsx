@@ -105,17 +105,34 @@ export default function Dashboard() {
         .order('hora', { ascending: false })
         .limit(5)
 
-      // Sessões para o calendário (próximos 60 dias)
-      const { data: sessoes } = await supabase
-        .from('prontuarios')
+      // Buscar sessões agendadas e prontuários para o calendário
+      // Buscar sessões agendadas
+      const { data: sessoesAgendadas } = await supabase
+        .from('sessoes_agendadas')
         .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id')
         .eq('pacientes.psicologo_id', user.id)
         .order('data', { ascending: true })
 
-      const sessoesComNome = sessoes?.map(s => ({
+      // Buscar prontuários (sessões que já aconteceram)
+      const { data: prontuarios } = await supabase
+        .from('prontuarios')
+        .select('*, pacientes!inner(id, nome_completo, psicologo_id)')
+        .eq('pacientes.psicologo_id', user.id)
+        .not('compareceu', 'is', null)
+        .order('data', { ascending: true })
+
+      // Combinar sessões agendadas e prontuários
+      const sessoesAgendadasComNome = sessoesAgendadas?.map(s => ({
         ...s,
         paciente_nome: s.pacientes.nome_completo
       })) || []
+
+      const prontuariosComNome = prontuarios?.map(p => ({
+        ...p,
+        paciente_nome: p.pacientes.nome_completo
+      })) || []
+
+      const sessoesComNome = [...sessoesAgendadasComNome, ...prontuariosComNome]
 
       setStats({
         totalPacientes: totalPacientes || 0,
@@ -204,7 +221,7 @@ export default function Dashboard() {
         if (recorrenciaError) throw recorrenciaError
 
         // Gerar todos os agendamentos recorrentes
-        const { prontuarios, errors } = await generateRecurringAppointments({
+        const { sessoesAgendadas, errors } = await generateRecurringAppointments({
           dataInicio: agendamentoForm.data,
           hora: agendamentoForm.hora,
           tipoRecorrencia: agendamentoForm.tipoRecorrencia,
@@ -220,39 +237,42 @@ export default function Dashboard() {
           setAgendamentoError(`Agendamentos criados, mas alguns erros ocorreram: ${errors.length} erro(s)`)
         }
       } else {
-        // Criar agendamento único
-        const { data: prontuario, error: prontuarioError } = await supabase
-          .from('prontuarios')
+        // Criar agendamento único em sessoes_agendadas
+        const { data: sessaoAgendada, error: sessaoError } = await supabase
+          .from('sessoes_agendadas')
           .insert([
             {
               paciente_id: agendamentoForm.paciente_id,
               data: agendamentoForm.data,
               hora: agendamentoForm.hora,
-              compareceu: null, // null = agendado
+              compareceu: null, // Ainda não foi marcado
               anotacoes: ''
             }
           ])
           .select()
           .single()
 
-        if (prontuarioError) throw prontuarioError
+        if (sessaoError) throw sessaoError
 
-        // Criar pagamento vinculado
-        const { error: pagamentoError } = await supabase
-          .from('pagamentos')
-          .insert([
-            {
-              prontuario_id: prontuario.id,
-              paciente_id: agendamentoForm.paciente_id,
-              data: agendamentoForm.data,
-              valor_sessao: valorSessao,
-              desconto: 0,
-              compareceu: null, // null = agendado
-              pago: false
-            }
-          ])
+        // Criar pagamento previsto apenas se criarPrevisao for true
+        if (agendamentoForm.criarPrevisao) {
+          const { error: pagamentoError } = await supabase
+            .from('pagamentos')
+            .insert([
+              {
+                sessao_agendada_id: sessaoAgendada.id,
+                paciente_id: agendamentoForm.paciente_id,
+                data: agendamentoForm.data,
+                valor_sessao: valorSessao,
+                desconto: 0,
+                compareceu: null, // Ainda não foi marcado
+                pago: false,
+                previsao: true // Pagamento previsto
+              }
+            ])
 
-        if (pagamentoError) throw pagamentoError
+          if (pagamentoError) throw pagamentoError
+        }
       }
 
       // Fechar modal e recarregar dados
@@ -605,4 +625,6 @@ export default function Dashboard() {
     </Layout>
   )
 }
+
+
 

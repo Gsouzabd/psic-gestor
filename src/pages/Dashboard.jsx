@@ -1,15 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import Calendar from '../components/Calendar'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import RecurrenceOptions from '../components/RecurrenceOptions'
 import { generateRecurringAppointments } from '../utils/recurrence'
+import { notifyPatient } from '../services/notificationService'
+import { useToast } from '../contexts/ToastContext'
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -21,6 +23,7 @@ const parseLocalDate = (dateString) => {
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { success, error: showError } = useToast()
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
     totalPacientes: 0,
@@ -45,14 +48,9 @@ export default function Dashboard() {
   const [savingAgendamento, setSavingAgendamento] = useState(false)
   const [agendamentoError, setAgendamentoError] = useState('')
 
-  useEffect(() => {
-    if (user) {
-      fetchDashboardData()
-      fetchPacientes()
-    }
-  }, [user])
-
   const fetchPacientes = async () => {
+    if (!user) return
+    
     try {
       const { data, error } = await supabase
         .from('pacientes')
@@ -67,7 +65,9 @@ export default function Dashboard() {
     }
   }
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
+    if (!user) return
+    
     try {
       // Total de pacientes
       const { count: totalPacientes } = await supabase
@@ -106,10 +106,10 @@ export default function Dashboard() {
         .limit(5)
 
       // Buscar sessões agendadas e prontuários para o calendário
-      // Buscar sessões agendadas
+      // Buscar sessões agendadas (incluindo campos de confirmação do paciente)
       const { data: sessoesAgendadas } = await supabase
         .from('sessoes_agendadas')
-        .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id')
+        .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id, confirmada_pelo_paciente, confirmada_em')
         .eq('pacientes.psicologo_id', user.id)
         .order('data', { ascending: true })
 
@@ -147,7 +147,59 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user])
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData()
+      fetchPacientes()
+    }
+  }, [user, fetchDashboardData])
+
+  // Escutar mudanças em tempo real nas sessões agendadas
+  useEffect(() => {
+    if (!user) return
+
+    const channel = supabase
+      .channel('sessoes_agendadas_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'sessoes_agendadas'
+        },
+        async (payload) => {
+          console.log('Mudança detectada em sessões agendadas:', payload)
+          
+          // Verificar se a mudança é relevante para este psicólogo
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            const sessaoId = payload.new?.id || payload.old?.id
+            if (sessaoId) {
+              // Buscar paciente para verificar se pertence ao psicólogo atual
+              const { data: sessao } = await supabase
+                .from('sessoes_agendadas')
+                .select('paciente_id, pacientes!inner(psicologo_id)')
+                .eq('id', sessaoId)
+                .single()
+              
+              if (sessao?.pacientes?.psicologo_id === user.id) {
+                // Recarregar dados do dashboard quando houver mudanças relevantes
+                fetchDashboardData()
+              }
+            }
+          } else if (payload.eventType === 'DELETE') {
+            // Para DELETE, sempre recarregar (mais seguro)
+            fetchDashboardData()
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user, fetchDashboardData])
 
   const handleEventClick = (session) => {
     setSelectedSession(session)
@@ -425,6 +477,12 @@ export default function Dashboard() {
                             <span className="hidden sm:inline">Faltou</span>
                             <span className="sm:hidden">X</span>
                           </span>
+                        ) : sessao.confirmada_pelo_paciente === true ? (
+                          <span className="flex items-center gap-1 text-blue-600 bg-blue-50 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium">
+                            <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4" />
+                            <span className="hidden sm:inline">Confirmada</span>
+                            <span className="sm:hidden">Conf</span>
+                          </span>
                         ) : (
                           <span className="flex items-center gap-1 text-yellow-600 bg-yellow-50 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium">
                             <CalendarIcon className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -469,7 +527,7 @@ export default function Dashboard() {
             </div>
             <div>
               <label className="text-sm font-medium text-gray-600">Status</label>
-              <div className="mt-1">
+              <div className="mt-1 space-y-2">
                 {selectedSession.compareceu === true ? (
                   <span className="flex items-center gap-2 text-green-600">
                     <CheckCircle className="w-5 h-5" />
@@ -486,6 +544,19 @@ export default function Dashboard() {
                     Agendado
                   </span>
                 )}
+                {selectedSession.confirmada_pelo_paciente === true && (
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <span className="flex items-center gap-2 text-blue-600">
+                      <CheckCircle className="w-5 h-5" />
+                      Confirmada pelo paciente
+                    </span>
+                    {selectedSession.confirmada_em && (
+                      <p className="text-xs text-gray-500 mt-1 ml-7">
+                        Confirmada em: {format(new Date(selectedSession.confirmada_em), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             {selectedSession.anotacoes && (
@@ -494,9 +565,27 @@ export default function Dashboard() {
                 <p className="text-gray-900 mt-1 whitespace-pre-wrap">{selectedSession.anotacoes}</p>
               </div>
             )}
+            {/* Botão NOTIFICAR PACIENTE - apenas para sessões agendadas (compareceu === null) */}
+            {selectedSession.compareceu === null && selectedSession.id && (
+              <button
+                onClick={async () => {
+                  try {
+                    await notifyPatient(selectedSession.id)
+                    success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                  } catch (error) {
+                    const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                    showError(message)
+                  }
+                }}
+                className="w-full bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
+              >
+                <MessageSquare className="w-5 h-5" />
+                NOTIFICAR PACIENTE
+              </button>
+            )}
             <button
               onClick={() => {
-                navigate(`/pacientes/${selectedSession.pacientes.id}?tab=prontuario`)
+                navigate(`/pacientes/${selectedSession.pacientes?.id || selectedSession.paciente_id}?tab=prontuario`)
                 setShowSessionModal(false)
               }}
               className="w-full bg-primary text-white py-3 rounded-lg font-medium hover:bg-opacity-90 transition"

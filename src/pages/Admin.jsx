@@ -4,7 +4,7 @@ import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { Users, Plus, Edit, Trash2, Search, AlertCircle, Shield, Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { Users, Plus, Edit, Trash2, Search, AlertCircle, Shield, Eye, EyeOff, RefreshCw, MessageSquare, Settings } from 'lucide-react'
 
 export default function Admin() {
   const { user, isAdmin } = useAuth()
@@ -22,6 +22,18 @@ export default function Admin() {
   const [resettingPassword, setResettingPassword] = useState(false)
   const [error, setError] = useState('')
   const [visiblePasswords, setVisiblePasswords] = useState({})
+  
+  // Estados para configuração Evolution API
+  const [evolutionConfig, setEvolutionConfig] = useState({
+    url: '',
+    key: ''
+  })
+  const [showEvolutionKey, setShowEvolutionKey] = useState(false)
+  const [savingEvolutionConfig, setSavingEvolutionConfig] = useState(false)
+  
+  // Estados para configuração Webhook global
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [savingWebhook, setSavingWebhook] = useState(false)
 
   // Formulário
   const [formData, setFormData] = useState({
@@ -32,6 +44,8 @@ export default function Admin() {
   useEffect(() => {
     if (user && isAdmin) {
       fetchPsicologos()
+      loadEvolutionApiConfig()
+      loadWebhookConfig()
     }
   }, [user, isAdmin])
 
@@ -236,6 +250,64 @@ export default function Admin() {
     }))
   }
 
+  // Carregar configuração Evolution API
+  const loadEvolutionApiConfig = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('system_config')
+        .select('key, value')
+        .in('key', ['evolution_api_url', 'evolution_api_key'])
+
+      if (error) throw error
+
+      const config = { url: '', key: '' }
+      data?.forEach((item) => {
+        if (item.key === 'evolution_api_url') {
+          config.url = item.value || ''
+        } else if (item.key === 'evolution_api_key') {
+          config.key = item.value || ''
+        }
+      })
+
+      setEvolutionConfig(config)
+    } catch (error) {
+      console.error('Erro ao carregar configuração Evolution API:', error)
+    }
+  }
+
+  // Salvar configuração Evolution API
+  const saveEvolutionApiConfig = async () => {
+    setSavingEvolutionConfig(true)
+    setError('')
+
+    try {
+      // Atualizar URL
+      const { error: urlError } = await supabase
+        .from('system_config')
+        .update({ value: evolutionConfig.url })
+        .eq('key', 'evolution_api_url')
+
+      if (urlError) throw urlError
+
+      // Atualizar Key
+      const { error: keyError } = await supabase
+        .from('system_config')
+        .update({ value: evolutionConfig.key })
+        .eq('key', 'evolution_api_key')
+
+      if (keyError) throw keyError
+
+      success('Configuração Evolution API salva com sucesso!')
+    } catch (error) {
+      console.error('Erro ao salvar configuração Evolution API:', error)
+      const message = error?.message || 'Erro ao salvar configuração. Tente novamente.'
+      showError(message)
+      setError(message)
+    } finally {
+      setSavingEvolutionConfig(false)
+    }
+  }
+
   if (loading) {
     return (
       <Layout>
@@ -397,6 +469,145 @@ export default function Admin() {
             </div>
           </div>
         )}
+
+        {/* Seção Configuração Evolution API */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <MessageSquare className="w-6 h-6 text-primary" />
+            <h2 className="text-xl font-bold text-gray-900">Configuração Evolution API</h2>
+          </div>
+          <p className="text-sm text-gray-600 mb-6">
+            Configure as credenciais globais da Evolution API. Estas credenciais serão usadas por todos os psicólogos do sistema.
+          </p>
+
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm text-red-800">{error}</span>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Evolution API - URL *
+              </label>
+              <input
+                type="text"
+                value={evolutionConfig.url}
+                onChange={(e) => setEvolutionConfig(prev => ({ ...prev, url: e.target.value }))}
+                placeholder="http://seu-servidor:8080"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                disabled={savingEvolutionConfig}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Evolution API - Chave *
+              </label>
+              <div className="relative">
+                <input
+                  type={showEvolutionKey ? "text" : "password"}
+                  value={evolutionConfig.key}
+                  onChange={(e) => setEvolutionConfig(prev => ({ ...prev, key: e.target.value }))}
+                  placeholder="Sua chave da Evolution API"
+                  className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                  disabled={savingEvolutionConfig}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEvolutionKey(!showEvolutionKey)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                  disabled={savingEvolutionConfig}
+                >
+                  {showEvolutionKey ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={saveEvolutionApiConfig}
+                disabled={savingEvolutionConfig || !evolutionConfig.url || !evolutionConfig.key}
+                className="flex items-center justify-center gap-2 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingEvolutionConfig ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Settings className="w-4 h-4" />
+                    Salvar Configuração
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Seção Configuração Webhook Global */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-6">
+          <div className="flex items-center gap-3 mb-4">
+            <MessageSquare className="w-6 h-6 text-primary" />
+            <h2 className="text-xl font-bold text-gray-900">Configuração Webhook WhatsApp</h2>
+          </div>
+          <p className="text-sm text-gray-600 mb-6">
+            Configure a URL do webhook global para receber mensagens do WhatsApp. Esta URL será usada por todas as instâncias WhatsApp do sistema.
+          </p>
+
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm text-red-800">{error}</span>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                URL do Webhook
+              </label>
+              <input
+                type="url"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://gsouzabd.app.n8n.cloud/webhook/notify-paciente-psic-gestor"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                disabled={savingWebhook}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                URL do webhook n8n para receber mensagens do WhatsApp
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={saveWebhookConfig}
+                disabled={savingWebhook}
+                className="flex items-center justify-center gap-2 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingWebhook ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Settings className="w-4 h-4" />
+                    Salvar Webhook
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Modal Criar Psicólogo */}

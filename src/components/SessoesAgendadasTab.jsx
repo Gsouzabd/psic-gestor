@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2 } from 'lucide-react'
+import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2, MessageSquare } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { marcarComparecimento } from '../utils/sessoesAgendadas'
 import { deleteFutureRecurringAppointments } from '../utils/recurrence'
 import RecurrenceActionModal from './RecurrenceActionModal'
+import { notifyPatient } from '../services/notificationService'
+import { useToast } from '../contexts/ToastContext'
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -15,10 +17,12 @@ const parseLocalDate = (dateString) => {
 }
 
 export default function SessoesAgendadasTab({ pacienteId, paciente }) {
+  const { success, error: showError } = useToast()
   const [loading, setLoading] = useState(true)
   const [sessoesAgendadas, setSessoesAgendadas] = useState([])
   const [showRecurrenceModal, setShowRecurrenceModal] = useState(false)
   const [pendingSessao, setPendingSessao] = useState(null)
+  const [notifyingSessaoId, setNotifyingSessaoId] = useState(null)
 
   useEffect(() => {
     fetchSessoesAgendadas()
@@ -292,21 +296,55 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                       <XCircle className="w-3 h-3" />
                       Não Compareceu
                     </span>
+                  ) : sessao.confirmada_pelo_paciente === true ? (
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3" />
+                        Confirmada pelo paciente
+                      </span>
+                      {sessao.confirmada_em && (
+                        <span className="text-xs text-gray-500">
+                          {format(new Date(sessao.confirmada_em), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        </span>
+                      )}
+                    </div>
                   ) : (
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleMarcarComparecimento(sessao, true)}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          Compareceu
+                        </button>
+                        <button
+                          onClick={() => handleMarcarComparecimento(sessao, false)}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-medium"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          Não Compareceu
+                        </button>
+                      </div>
+                      {/* Botão NOTIFICAR PACIENTE */}
                       <button
-                        onClick={() => handleMarcarComparecimento(sessao, true)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium"
+                        onClick={async () => {
+                          try {
+                            setNotifyingSessaoId(sessao.id)
+                            await notifyPatient(sessao.id)
+                            success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                          } catch (error) {
+                            const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                            showError(message)
+                          } finally {
+                            setNotifyingSessaoId(null)
+                          }
+                        }}
+                        disabled={notifyingSessaoId === sessao.id}
+                        className="flex items-center justify-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <CheckCircle className="w-4 h-4" />
-                        Compareceu
-                      </button>
-                      <button
-                        onClick={() => handleMarcarComparecimento(sessao, false)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-medium"
-                      >
-                        <XCircle className="w-4 h-4" />
-                        Não Compareceu
+                        <MessageSquare className="w-4 h-4" />
+                        {notifyingSessaoId === sessao.id ? 'Enviando...' : 'NOTIFICAR PACIENTE'}
                       </button>
                     </div>
                   )}

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LayoutDashboard, Users, LogOut, User, Menu, X, Shield, Settings } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, User, Menu, X, Shield, Settings, ClipboardCheck } from 'lucide-react'
+import NotificationBadge from './NotificationBadge'
 
 export default function Sidebar() {
   const location = useLocation()
@@ -21,6 +22,7 @@ export default function Sidebar() {
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/pacientes', icon: Users, label: 'Pacientes' },
+    { path: '/confirmacoes', icon: ClipboardCheck, label: 'Confirmações' },
     { path: '/configuracoes', icon: Settings, label: 'Configurações' },
     ...(isAdmin ? [{ path: '/admin', icon: Shield, label: 'Admin' }] : []),
   ]
@@ -53,7 +55,10 @@ export default function Sidebar() {
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         <div className="p-4 lg:p-6 border-b border-gray-200">
-          <h1 className="text-xl lg:text-2xl font-bold text-primary">Psic Gestor</h1>
+          <div className="flex items-center justify-between mb-2">
+            <h1 className="text-xl lg:text-2xl font-bold text-primary">Psic Gestor</h1>
+            {profile && <NotificationBadge />}
+          </div>
           {profile && (
             <p className="text-xs lg:text-sm text-gray-600 mt-2 flex items-center gap-2 truncate">
               <User className="w-3 h-3 lg:w-4 lg:h-4 flex-shrink-0" />

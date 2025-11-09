@@ -4,6 +4,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 };
 
 interface EvolutionAPIConfig {
@@ -153,7 +154,12 @@ async function proxyToEvolutionAPI(
 Deno.serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { 
+      headers: {
+        ...corsHeaders,
+        'Access-Control-Max-Age': '86400', // Cache preflight por 24 horas
+      }
+    });
   }
 
   try {
@@ -335,7 +341,10 @@ Deno.serve(async (req: Request) => {
     if (pathname.startsWith('/instance/delete/') && req.method === 'DELETE') {
       const instanceName = pathname.replace('/instance/delete/', '');
 
+      console.log('Iniciando deleção de instância:', instanceName);
+
       if (!(await verifyInstanceOwnership(supabase, instanceName, psicologoId))) {
+        console.error('Instância não encontrada ou sem permissão:', instanceName);
         return new Response(
           JSON.stringify({ error: 'Instância não encontrada ou sem permissão' }),
           {
@@ -345,23 +354,56 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Deletar na Evolution API
+      // Deletar na Evolution API primeiro
+      console.log('Deletando instância na Evolution API:', instanceName);
       const evolutionResponse = await proxyToEvolutionAPI(
         evolutionConfig,
         'DELETE',
         `/instance/delete/${instanceName}`
       );
 
+      // Clonar a resposta para poder ler o body sem consumir a original
+      const clonedResponse = evolutionResponse.clone();
+      const evolutionResponseText = await clonedResponse.text();
+      
+      console.log('Resposta da Evolution API:', {
+        status: evolutionResponse.status,
+        statusText: evolutionResponse.statusText,
+        body: evolutionResponseText.substring(0, 500),
+      });
+
+      // Se a Evolution API retornar erro, ainda tentar deletar do banco
+      // mas logar o erro para debug
       if (!evolutionResponse.ok) {
-        return evolutionResponse;
+        console.error('Erro ao deletar na Evolution API:', {
+          status: evolutionResponse.status,
+          body: evolutionResponseText,
+        });
+        // Continuar para deletar do banco mesmo se a Evolution API falhar
+        // para evitar que a instância fique órfã no banco
+      } else {
+        console.log('Instância deletada com sucesso na Evolution API');
       }
 
       // Deletar do banco
-      await supabase
+      console.log('Deletando instância do banco:', instanceName);
+      const { error: dbError } = await supabase
         .from('whatsapp_instances')
         .delete()
         .eq('instance_name', instanceName);
 
+      if (dbError) {
+        console.error('Erro ao deletar do banco:', dbError);
+        return new Response(
+          JSON.stringify({ error: 'Erro ao deletar instância do banco', details: dbError.message }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      console.log('Instância deletada com sucesso:', instanceName);
       return new Response(JSON.stringify({ success: true }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

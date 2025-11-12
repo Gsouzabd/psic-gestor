@@ -35,6 +35,10 @@ export default function Dashboard() {
   const [selectedSession, setSelectedSession] = useState(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [showAgendamentoModal, setShowAgendamentoModal] = useState(false)
+  const [showMultipleSessionsModal, setShowMultipleSessionsModal] = useState(false)
+  const [multipleSessions, setMultipleSessions] = useState([])
+  const [multipleSessionsDate, setMultipleSessionsDate] = useState(null)
+  const [notifyingSessaoId, setNotifyingSessaoId] = useState(null)
   const [pacientes, setPacientes] = useState([])
   const [agendamentoForm, setAgendamentoForm] = useState({
     paciente_id: '',
@@ -224,6 +228,18 @@ export default function Dashboard() {
     })
     setShowAgendamentoModal(true)
     setAgendamentoError('')
+  }
+
+  const handleMultipleSessionsClick = (date, sessions) => {
+    setMultipleSessionsDate(date)
+    // Ordenar sessões por hora
+    const sortedSessions = [...sessions].sort((a, b) => {
+      const horaA = a.hora || '00:00'
+      const horaB = b.hora || '00:00'
+      return horaA.localeCompare(horaB)
+    })
+    setMultipleSessions(sortedSessions)
+    setShowMultipleSessionsModal(true)
   }
 
   const handleCreateAgendamento = async (e) => {
@@ -430,7 +446,12 @@ export default function Dashboard() {
         {/* Calendário */}
         <div>
           <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4">Agenda de Sessões</h2>
-          <Calendar sessions={calendarSessions} onEventClick={handleEventClick} onDayClick={handleDayClick} />
+          <Calendar 
+            sessions={calendarSessions} 
+            onEventClick={handleEventClick} 
+            onDayClick={handleDayClick}
+            onMultipleSessionsClick={handleMultipleSessionsClick}
+          />
         </div>
 
         {/* Últimas Sessões */}
@@ -594,6 +615,93 @@ export default function Dashboard() {
             </button>
           </div>
         )}
+      </Modal>
+
+      {/* Modal de Múltiplas Sessões */}
+      <Modal
+        isOpen={showMultipleSessionsModal}
+        onClose={() => {
+          setShowMultipleSessionsModal(false)
+          setMultipleSessions([])
+          setMultipleSessionsDate(null)
+        }}
+        title={`Sessões do dia ${multipleSessionsDate ? format(multipleSessionsDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : ''}`}
+        size="md"
+      >
+        <div className="space-y-3">
+          {multipleSessions.map((sessao) => {
+            // Determinar cor baseado no status
+            let statusColor = 'bg-yellow-100 text-yellow-800'
+            let statusText = 'Agendado'
+            if (sessao.compareceu === true) {
+              statusColor = 'bg-green-100 text-green-800'
+              statusText = 'Compareceu'
+            } else if (sessao.compareceu === false) {
+              statusColor = 'bg-red-100 text-red-800'
+              statusText = 'Faltou'
+            } else if (sessao.confirmada_pelo_paciente === true) {
+              statusColor = 'bg-blue-100 text-blue-800'
+              statusText = 'Confirmada'
+            }
+
+            return (
+              <div
+                key={sessao.id}
+                className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 mb-1">
+                      {sessao.paciente_nome}
+                    </h3>
+                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-4 h-4" />
+                        {sessao.hora?.slice(0, 5)}
+                      </span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColor}`}>
+                        {statusText}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedSession(sessao)
+                      setShowMultipleSessionsModal(false)
+                      setShowSessionModal(true)
+                    }}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition text-sm"
+                  >
+                    Ver Detalhes
+                  </button>
+                  {sessao.compareceu === null && sessao.id && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          setNotifyingSessaoId(sessao.id)
+                          await notifyPatient(sessao.id)
+                          success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                        } catch (error) {
+                          const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                          showError(message)
+                        } finally {
+                          setNotifyingSessaoId(null)
+                        }
+                      }}
+                      disabled={notifyingSessaoId === sessao.id}
+                      className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      {notifyingSessaoId === sessao.id ? 'Enviando...' : 'Notificar'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </Modal>
 
       {/* Modal de Novo Agendamento */}

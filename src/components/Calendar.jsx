@@ -23,7 +23,7 @@ const parseLocalDate = (dateString) => {
   return new Date(year, month - 1, day)
 }
 
-export default function Calendar({ sessions = [], onEventClick, onDayClick }) {
+export default function Calendar({ sessions = [], onEventClick, onDayClick, onMultipleSessionsClick }) {
   const [currentMonth, setCurrentMonth] = useState(new Date())
 
   const monthStart = startOfMonth(currentMonth)
@@ -81,7 +81,7 @@ export default function Calendar({ sessions = [], onEventClick, onDayClick }) {
             onDayClick && isCurrentMonth ? 'cursor-pointer hover:bg-gray-50' : ''
           }`}
           onClick={() => {
-            if (onDayClick && isCurrentMonth && daySessions.length === 0) {
+            if (onDayClick && isCurrentMonth) {
               onDayClick(currentDay)
             }
           }}
@@ -129,9 +129,18 @@ export default function Calendar({ sessions = [], onEventClick, onDayClick }) {
               )
             })}
             {daySessions.length > 2 && (
-              <div className="text-[10px] sm:text-xs text-gray-500 px-1 sm:px-2">
-                +{daySessions.length - 2}
-              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (onMultipleSessionsClick) {
+                    onMultipleSessionsClick(currentDay, daySessions)
+                  }
+                }}
+                className="w-full text-left text-[10px] sm:text-xs text-blue-600 hover:text-blue-700 hover:underline px-1 sm:px-2 font-medium cursor-pointer"
+                title={`Ver todas as ${daySessions.length} sessões deste dia`}
+              >
+                +{daySessions.length - 2} mais
+              </button>
             )}
           </div>
         </div>

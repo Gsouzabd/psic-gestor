@@ -268,8 +268,56 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
       return null
     }
 
-    const connectionState = await getConnectionState(instance.instance_name)
+    // Guardar status anterior para detectar desconexão
+    const previousStatus = instance.status
+
+    let connectionState: EvolutionAPIConnectionState | null = null
+    try {
+      connectionState = await getConnectionState(instance.instance_name)
+    } catch (error: any) {
+      // Se houver erro ao obter status (ex: instância não existe mais na Evolution API)
+      // e estava conectado, considerar como desconexão
+      if (previousStatus === 'connected') {
+        console.log('Erro ao obter status - possivel desconexão:', error)
+        // Criar notificação e deletar instância
+        await createDisconnectNotification(psicologoId, instance.instance_name)
+        
+        // Disparar evento para mostrar toast no layout
+        window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
+          detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
+        }))
+        
+        try {
+          await deleteInstance(instance.instance_name, instance.id)
+          console.log('Instância deletada automaticamente após erro ao obter status')
+        } catch (deleteError) {
+          console.error('Erro ao deletar instância após erro:', deleteError)
+        }
+        return null
+      }
+      // Se não estava conectado, apenas retornar a instância atual
+      return instance
+    }
+
     if (!connectionState) {
+      // Se connectionState for null e estava conectado, considerar desconexão
+      if (previousStatus === 'connected') {
+        console.log('Status null - possivel desconexão')
+        await createDisconnectNotification(psicologoId, instance.instance_name)
+        
+        // Disparar evento para mostrar toast no layout
+        window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
+          detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
+        }))
+        
+        try {
+          await deleteInstance(instance.instance_name, instance.id)
+          console.log('Instância deletada automaticamente após status null')
+        } catch (deleteError) {
+          console.error('Erro ao deletar instância após status null:', deleteError)
+        }
+        return null
+      }
       return instance
     }
 
@@ -307,6 +355,36 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
       status = 'disconnected'
       errorMessage = 'Conexão fechada'
       console.log('Status mapeado para: disconnected')
+      
+      // Se a conexão está fechada, sempre deletar a instância
+      // independente do status anterior
+      console.log('🚨 CONEXÃO FECHADA DETECTADA! Deletando instância...')
+      
+      // Criar notificação de desconexão se estava conectado
+      if (previousStatus === 'connected') {
+        try {
+          await createDisconnectNotification(psicologoId, instance.instance_name)
+          console.log('✅ Notificação de desconexão criada com sucesso')
+          
+          // Disparar evento para mostrar toast no layout
+          window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
+            detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
+          }))
+        } catch (notifError) {
+          console.error('❌ Erro ao criar notificação:', notifError)
+        }
+      }
+      
+      // Sempre deletar instância quando conexão está fechada
+      try {
+        await deleteInstance(instance.instance_name, instance.id)
+        console.log('✅ Instância deletada automaticamente após conexão fechada')
+      } catch (deleteError) {
+        console.error('❌ Erro ao deletar instância após conexão fechada:', deleteError)
+      }
+      
+      // Retornar null pois a instância foi deletada
+      return null
     } else {
       // Se não reconhecer, verificar se há outras propriedades que indiquem conexão
       console.warn('Estado não reconhecido:', state, 'Dados completos:', JSON.stringify(connectionState))
@@ -316,7 +394,63 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
       }
     }
 
-    // Atualizar instância no banco
+    // Detectar desconexão: se estava conectado e agora está desconectado
+    const wasDisconnected = previousStatus === 'connected' && (status === 'disconnected' || status === 'error')
+    
+    console.log('Verificação de desconexão:', {
+      previousStatus,
+      currentStatus: status,
+      wasDisconnected,
+      instanceName: instance.instance_name
+    })
+    
+    if (wasDisconnected) {
+      console.log('✅ DESCONEXÃO DETECTADA! Criando notificação e deletando instância...')
+      
+      // Criar notificação de desconexão
+      try {
+        await createDisconnectNotification(psicologoId, instance.instance_name)
+        console.log('✅ Notificação de desconexão criada com sucesso')
+        
+        // Disparar evento para mostrar toast no layout
+        window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
+          detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
+        }))
+      } catch (notifError) {
+        console.error('❌ Erro ao criar notificação:', notifError)
+      }
+      
+      // Deletar instância automaticamente
+      try {
+        await deleteInstance(instance.instance_name, instance.id)
+        console.log('✅ Instância deletada automaticamente após desconexão')
+      } catch (deleteError) {
+        console.error('❌ Erro ao deletar instância após desconexão:', deleteError)
+        // Continuar mesmo se a deleção falhar
+      }
+      
+      // Retornar null pois a instância foi deletada
+      return null
+    }
+
+    // Só atualizar no banco se o status ou outras informações mudaram
+    const statusChanged = previousStatus !== status
+    const phoneChanged = phoneNumber && phoneNumber !== instance.phone_number
+    const errorChanged = errorMessage !== instance.error_message
+    
+    // Se nada mudou, apenas atualizar last_status_check sem disparar UPDATE completo
+    if (!statusChanged && !phoneChanged && !errorChanged) {
+      // Atualizar apenas last_status_check silenciosamente (sem disparar Realtime)
+      await supabase
+        .from('whatsapp_instances')
+        .update({ last_status_check: new Date().toISOString() })
+        .eq('id', instance.id)
+      
+      console.log('ℹ️ Status não mudou, apenas atualizando last_status_check')
+      return instance
+    }
+    
+    // Atualizar instância no banco apenas se houver mudanças
     const { data, error } = await supabase
       .from('whatsapp_instances')
       .update({
@@ -327,11 +461,17 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
       })
       .eq('id', instance.id)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error('Erro ao atualizar status no banco:', error)
       throw error
+    }
+
+    // Se não encontrou a instância (foi deletada), retornar null
+    if (!data) {
+      console.log('Instância não encontrada após atualização - pode ter sido deletada')
+      return null
     }
 
     return data as WhatsAppInstance
@@ -359,6 +499,32 @@ export async function updateQRCode(instanceId: string, qrCode: string): Promise<
   } catch (error) {
     console.error('Erro ao atualizar QR code no banco:', error)
     throw error
+  }
+}
+
+// Criar notificação de desconexão do WhatsApp
+export async function createDisconnectNotification(psicologoId: string, instanceName: string): Promise<void> {
+  try {
+    console.log('Criando notificação de desconexão para:', { psicologoId, instanceName })
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert({
+        psicologo_id: psicologoId,
+        type: 'whatsapp_disconnect',
+        message: `Sua conexão WhatsApp foi desconectada. Por favor, reconecte seu WhatsApp nas configurações.`,
+        sessao_id: null,
+      })
+      .select()
+
+    if (error) {
+      console.error('❌ Erro ao criar notificação de desconexão:', error)
+      // Não lançar erro para não interromper o fluxo principal
+    } else {
+      console.log('✅ Notificação de desconexão criada:', data)
+    }
+  } catch (error) {
+    console.error('❌ Erro ao criar notificação de desconexão:', error)
+    // Não lançar erro para não interromper o fluxo principal
   }
 }
 

@@ -15,13 +15,20 @@ export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([])
 
   const showToast = useCallback((message, type = 'info') => {
+    console.log('🎯 showToast chamado:', { message, type })
     const id = Date.now() + Math.random()
     const newToast = { id, message, type }
     
-    setToasts(prev => [...prev, newToast])
+    console.log('📝 Adicionando toast ao estado:', newToast)
+    setToasts(prev => {
+      const updated = [...prev, newToast]
+      console.log('📊 Total de toasts agora:', updated.length)
+      return updated
+    })
 
     // Remover automaticamente após 5 segundos
     setTimeout(() => {
+      console.log('⏰ Removendo toast após 5 segundos:', id)
       setToasts(prev => prev.filter(toast => toast.id !== id))
     }, 5000)
   }, [])
@@ -43,11 +50,18 @@ export const ToastProvider = ({ children }) => {
 }
 
 const ToastContainer = ({ toasts, onRemove }) => {
+  console.log('🎨 ToastContainer renderizado com', toasts.length, 'toasts')
+  
+  if (toasts.length === 0) {
+    return null
+  }
+  
   return (
     <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-md w-full">
-      {toasts.map(toast => (
-        <Toast key={toast.id} toast={toast} onRemove={onRemove} />
-      ))}
+      {toasts.map(toast => {
+        console.log('🎯 Renderizando toast:', toast.id, toast.message)
+        return <Toast key={toast.id} toast={toast} onRemove={onRemove} />
+      })}
     </div>
   )
 }

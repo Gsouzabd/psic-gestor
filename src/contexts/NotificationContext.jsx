@@ -48,6 +48,44 @@ export const NotificationProvider = ({ children }) => {
     fetchNotifications()
   }, [fetchNotifications])
 
+  // Escutar novas notificações em tempo real usando Supabase Realtime
+  useEffect(() => {
+    if (!user?.id) return
+
+    const channel = supabase
+      .channel(`notifications_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `psicologo_id=eq.${user.id}`
+        },
+        (payload) => {
+          console.log('🔔 Nova notificação recebida em tempo real:', payload)
+          // Adicionar nova notificação ao estado
+          if (payload.new) {
+            console.log('✅ Adicionando notificação ao estado:', payload.new)
+            setNotifications(prev => {
+              // Verificar se já existe para evitar duplicatas
+              const exists = prev.some(n => n.id === payload.new.id)
+              if (exists) {
+                console.log('⚠️ Notificação já existe no estado, ignorando')
+                return prev
+              }
+              return [payload.new, ...prev]
+            })
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id])
+
   // Contar notificações não lidas
   const unreadCount = notifications.filter(n => !n.read).length
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
+import { useNotifications } from '../contexts/NotificationContext'
 import { supabase } from '../lib/supabase'
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle, MessageSquare, QrCode, RefreshCw, Trash2, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import * as whatsappService from '../services/whatsappService'
@@ -9,6 +10,7 @@ import * as whatsappService from '../services/whatsappService'
 export default function Configuracoes() {
   const { user, profile } = useAuth()
   const { success, error: showError } = useToast()
+  const { refreshNotifications } = useNotifications()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
@@ -39,22 +41,35 @@ export default function Configuracoes() {
     }
   }, [user, profile])
 
-  // Polling automático quando status = connecting
+  // Polling automático quando status = connecting ou connected
+  // Monitora para detectar desconexões
   useEffect(() => {
-    if (!whatsappInstance || whatsappInstance.status !== 'connecting') {
+    if (!whatsappInstance || (whatsappInstance.status !== 'connecting' && whatsappInstance.status !== 'connected')) {
       return
     }
 
+    // Intervalo diferente para connecting (mais frequente) e connected (menos frequente)
+    const intervalTime = whatsappInstance.status === 'connecting' ? 5000 : 30000
+
     const interval = setInterval(async () => {
       try {
-        await syncWhatsAppStatus()
+        const updatedInstance = await syncWhatsAppStatus()
+        // Se a instância foi deletada (retornou null), atualizar estado
+        if (!updatedInstance && whatsappInstance) {
+          setWhatsappInstance(null)
+          // Recarregar notificações para mostrar a nova notificação de desconexão
+          if (refreshNotifications) {
+            refreshNotifications()
+          }
+          showError('Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.')
+        }
       } catch (error) {
         console.error('Erro no polling:', error)
       }
-    }, 5000) // A cada 5 segundos
+    }, intervalTime)
 
     return () => clearInterval(interval)
-  }, [whatsappInstance?.status])
+  }, [whatsappInstance?.status, whatsappInstance?.id, refreshNotifications, showError])
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
@@ -181,7 +196,7 @@ export default function Configuracoes() {
 
   // Sincronizar status
   const syncWhatsAppStatus = async () => {
-    if (!profile?.id) return
+    if (!profile?.id) return null
 
     try {
       const instance = await whatsappService.syncInstanceStatus(profile.id)
@@ -204,9 +219,15 @@ export default function Configuracoes() {
             console.warn('Erro ao obter QR code durante sincronização:', qrError)
           }
         }
+        return instance
+      } else {
+        // Instância foi deletada (provavelmente por desconexão)
+        setWhatsappInstance(null)
+        return null
       }
     } catch (error) {
       console.error('Erro ao sincronizar status:', error)
+      return null
     }
   }
 

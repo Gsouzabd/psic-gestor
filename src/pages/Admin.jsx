@@ -38,7 +38,8 @@ export default function Admin() {
   // Formulário
   const [formData, setFormData] = useState({
     nome_completo: '',
-    email: ''
+    email: '',
+    role: 'psicologo' // 'psicologo' ou 'esteticista'
   })
 
   useEffect(() => {
@@ -112,7 +113,8 @@ export default function Admin() {
         body: {
           nome_completo: formData.nome_completo,
           email: formData.email,
-          senha: senha
+          senha: senha,
+          role: formData.role
         }
       })
 
@@ -122,14 +124,15 @@ export default function Admin() {
         throw new Error(functionData.error)
       }
 
-      success(`Psicólogo "${formData.nome_completo}" criado com sucesso! Credenciais: Email: ${formData.email}, Senha: ${senha}`)
+      const tipoUsuario = formData.role === 'esteticista' ? 'Esteticista' : 'Psicólogo'
+      success(`${tipoUsuario} "${formData.nome_completo}" criado com sucesso! Credenciais: Email: ${formData.email}, Senha: ${senha}`)
       
       setShowCreateModal(false)
-      setFormData({ nome_completo: '', email: '' })
+      setFormData({ nome_completo: '', email: '', role: 'psicologo' })
       fetchPsicologos()
     } catch (error) {
-      console.error('Erro ao criar psicólogo:', error)
-      const message = error?.message || 'Erro ao criar psicólogo. Tente novamente.'
+      console.error('Erro ao criar profissional:', error)
+      const message = error?.message || 'Erro ao criar profissional. Tente novamente.'
       showError(message)
       setError(message)
     } finally {
@@ -141,7 +144,8 @@ export default function Admin() {
     setEditingPsicologo(psicologo)
     setFormData({
       nome_completo: psicologo.nome_completo || '',
-      email: psicologo.email || ''
+      email: psicologo.email || '',
+      role: psicologo.role || 'psicologo'
     })
     setShowEditModal(true)
   }
@@ -156,21 +160,23 @@ export default function Admin() {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          nome_completo: formData.nome_completo
+          nome_completo: formData.nome_completo,
+          role: formData.role
         })
         .eq('id', editingPsicologo.id)
 
       if (updateError) throw updateError
 
-      success(`Psicólogo "${formData.nome_completo}" atualizado com sucesso!`)
+      const tipoUsuario = formData.role === 'esteticista' ? 'Esteticista' : 'Psicólogo'
+      success(`${tipoUsuario} "${formData.nome_completo}" atualizado com sucesso!`)
       
       setShowEditModal(false)
       setEditingPsicologo(null)
-      setFormData({ nome_completo: '', email: '' })
+      setFormData({ nome_completo: '', email: '', role: 'psicologo' })
       fetchPsicologos()
     } catch (error) {
-      console.error('Erro ao atualizar psicólogo:', error)
-      const message = error?.message || 'Erro ao atualizar psicólogo. Tente novamente.'
+      console.error('Erro ao atualizar profissional:', error)
+      const message = error?.message || 'Erro ao atualizar profissional. Tente novamente.'
       showError(message)
       setError(message)
     } finally {
@@ -179,7 +185,8 @@ export default function Admin() {
   }
 
   const handleDelete = async (psicologo) => {
-    if (!confirm(`Tem certeza que deseja excluir o psicólogo "${psicologo.nome_completo}"?\n\nEsta ação não pode ser desfeita e todos os dados relacionados serão removidos.`)) {
+    const tipoUsuario = psicologo.role === 'esteticista' ? 'esteticista' : 'psicólogo'
+    if (!confirm(`Tem certeza que deseja excluir o ${tipoUsuario} "${psicologo.nome_completo}"?\n\nEsta ação não pode ser desfeita e todos os dados relacionados serão removidos.`)) {
       return
     }
 
@@ -191,11 +198,12 @@ export default function Admin() {
 
       if (deleteError) throw deleteError
 
-      success(`Psicólogo "${psicologo.nome_completo}" excluído com sucesso!`)
+      const tipoUsuarioMsg = psicologo.role === 'esteticista' ? 'Esteticista' : 'Psicólogo'
+      success(`${tipoUsuarioMsg} "${psicologo.nome_completo}" excluído com sucesso!`)
       fetchPsicologos()
     } catch (error) {
-      console.error('Erro ao deletar psicólogo:', error)
-      const message = error?.message || 'Erro ao deletar psicólogo. Tente novamente.'
+      console.error('Erro ao deletar profissional:', error)
+      const message = error?.message || 'Erro ao deletar profissional. Tente novamente.'
       showError(message)
     }
   }
@@ -228,7 +236,8 @@ export default function Admin() {
         throw new Error(data.error)
       }
 
-      success(`Senha do psicólogo "${resettingPasswordFor.nome_completo}" redefinida com sucesso! Nova senha: ${novaSenha}`)
+      const tipoUsuario = resettingPasswordFor.role === 'esteticista' ? 'Esteticista' : 'Psicólogo'
+      success(`Senha do ${tipoUsuario.toLowerCase()} "${resettingPasswordFor.nome_completo}" redefinida com sucesso! Nova senha: ${novaSenha}`)
       
       setShowResetPasswordModal(false)
       setResettingPasswordFor(null)
@@ -308,6 +317,51 @@ export default function Admin() {
     }
   }
 
+  // Carregar configuração Webhook
+  const loadWebhookConfig = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('system_config')
+        .select('value')
+        .eq('key', 'whatsapp_webhook_url')
+        .single()
+
+      if (error && error.code !== 'PGRST116') throw error
+
+      if (data) {
+        setWebhookUrl(data.value || '')
+      }
+    } catch (error) {
+      console.error('Erro ao carregar configuração Webhook:', error)
+    }
+  }
+
+  // Salvar configuração Webhook
+  const saveWebhookConfig = async () => {
+    setSavingWebhook(true)
+    setError('')
+
+    try {
+      const { error: upsertError } = await supabase
+        .from('system_config')
+        .upsert(
+          { key: 'whatsapp_webhook_url', value: webhookUrl },
+          { onConflict: 'key' }
+        )
+
+      if (upsertError) throw upsertError
+
+      success('Configuração Webhook salva com sucesso!')
+    } catch (error) {
+      console.error('Erro ao salvar configuração Webhook:', error)
+      const message = error?.message || 'Erro ao salvar configuração. Tente novamente.'
+      showError(message)
+      setError(message)
+    } finally {
+      setSavingWebhook(false)
+    }
+  }
+
   if (loading) {
     return (
       <Layout>
@@ -328,7 +382,7 @@ export default function Admin() {
               Painel Administrativo
             </h1>
             <p className="text-sm sm:text-base text-gray-600 mt-1">
-              Gerenciar psicólogos do sistema
+              Gerenciar profissionais do sistema
             </p>
           </div>
           <button
@@ -336,7 +390,7 @@ export default function Admin() {
             className="flex items-center justify-center gap-2 bg-primary text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg font-medium hover:bg-opacity-90 transition shadow-sm hover:shadow-md text-sm sm:text-base w-full sm:w-auto"
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-            Novo Psicólogo
+            Novo Profissional
           </button>
         </div>
 
@@ -357,12 +411,12 @@ export default function Admin() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 sm:p-12 text-center">
             <Users className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-gray-400 mb-3 sm:mb-4" />
             <h3 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2">
-              {searchTerm ? 'Nenhum psicólogo encontrado' : 'Nenhum psicólogo cadastrado'}
+              {searchTerm ? 'Nenhum profissional encontrado' : 'Nenhum profissional cadastrado'}
             </h3>
             <p className="text-sm sm:text-base text-gray-600 mb-4 sm:mb-6">
               {searchTerm 
                 ? 'Tente buscar com outros termos' 
-                : 'Comece adicionando seu primeiro psicólogo'}
+                : 'Comece adicionando seu primeiro profissional'}
             </p>
             {!searchTerm && (
               <button
@@ -370,7 +424,7 @@ export default function Admin() {
                 className="inline-flex items-center gap-2 bg-primary text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg font-medium hover:bg-opacity-90 transition text-sm sm:text-base"
               >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-                Adicionar Psicólogo
+                Adicionar Profissional
               </button>
             )}
           </div>
@@ -385,6 +439,9 @@ export default function Admin() {
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Email
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Tipo
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Senha
@@ -409,6 +466,19 @@ export default function Admin() {
                         <div className="text-sm text-gray-600">
                           {psicologo.email}
                         </div>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          psicologo.role === 'esteticista' 
+                            ? 'bg-pink-100 text-pink-800' 
+                            : psicologo.role === 'admin_master'
+                            ? 'bg-purple-100 text-purple-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {psicologo.role === 'esteticista' ? 'Esteticista' : 
+                           psicologo.role === 'admin_master' ? 'Admin' : 
+                           'Psicólogo'}
+                        </span>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
                         {psicologo.senha_inicial ? (
@@ -615,10 +685,10 @@ export default function Admin() {
         isOpen={showCreateModal}
         onClose={() => {
           setShowCreateModal(false)
-          setFormData({ nome_completo: '', email: '' })
+          setFormData({ nome_completo: '', email: '', role: 'psicologo' })
           setError('')
         }}
-        title="Novo Psicólogo"
+        title="Novo Profissional"
         size="md"
       >
         {error && (
@@ -660,12 +730,31 @@ export default function Admin() {
             </p>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Tipo de Usuário *
+            </label>
+            <select
+              name="role"
+              value={formData.role}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="psicologo">Psicólogo</option>
+              <option value="esteticista">Esteticista</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Selecione o tipo de profissional
+            </p>
+          </div>
+
           <div className="flex gap-3 pt-4">
             <button
               type="button"
               onClick={() => {
                 setShowCreateModal(false)
-                setFormData({ nome_completo: '', email: '' })
+                setFormData({ nome_completo: '', email: '', role: 'psicologo' })
                 setError('')
               }}
               className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
@@ -685,7 +774,7 @@ export default function Admin() {
               ) : (
                 <>
                   <Plus className="w-4 h-4" />
-                  Criar Psicólogo
+                  Criar Profissional
                 </>
               )}
             </button>
@@ -699,10 +788,10 @@ export default function Admin() {
         onClose={() => {
           setShowEditModal(false)
           setEditingPsicologo(null)
-          setFormData({ nome_completo: '', email: '' })
+          setFormData({ nome_completo: '', email: '', role: 'psicologo' })
           setError('')
         }}
-        title="Editar Psicólogo"
+        title="Editar Profissional"
         size="md"
       >
         {error && (
@@ -740,6 +829,25 @@ export default function Admin() {
             />
             <p className="mt-1 text-xs text-gray-500">
               O email não pode ser alterado
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Tipo de Usuário *
+            </label>
+            <select
+              name="role"
+              value={formData.role}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="psicologo">Psicólogo</option>
+              <option value="esteticista">Esteticista</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Selecione o tipo de profissional
             </p>
           </div>
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2, MessageSquare } from 'lucide-react'
+import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2, MessageSquare, Video, MapPin, ExternalLink } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { marcarComparecimento } from '../utils/sessoesAgendadas'
@@ -20,6 +20,8 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
   const { success, error: showError } = useToast()
   const [loading, setLoading] = useState(true)
   const [sessoesAgendadas, setSessoesAgendadas] = useState([])
+  const [sessoesFiltradas, setSessoesFiltradas] = useState([])
+  const [filtroStatus, setFiltroStatus] = useState('todas') // todas, agendadas, confirmadas, canceladas
   const [showRecurrenceModal, setShowRecurrenceModal] = useState(false)
   const [pendingSessao, setPendingSessao] = useState(null)
   const [notifyingSessaoId, setNotifyingSessaoId] = useState(null)
@@ -27,6 +29,37 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
   useEffect(() => {
     fetchSessoesAgendadas()
   }, [pacienteId])
+
+  useEffect(() => {
+    aplicarFiltro(sessoesAgendadas, filtroStatus)
+  }, [filtroStatus, sessoesAgendadas])
+
+  const aplicarFiltro = (sessoes, filtro) => {
+    let filtradas = sessoes
+    switch (filtro) {
+      case 'agendadas':
+        filtradas = sessoes.filter(s => s.compareceu === null)
+        break
+      case 'confirmadas':
+        filtradas = sessoes.filter(s => s.compareceu === true)
+        break
+      case 'canceladas':
+        filtradas = sessoes.filter(s => s.compareceu === false)
+        break
+      default:
+        filtradas = sessoes
+    }
+    setSessoesFiltradas(filtradas)
+  }
+
+  const contarPorStatus = () => {
+    return {
+      todas: sessoesAgendadas.length,
+      agendadas: sessoesAgendadas.filter(s => s.compareceu === null).length,
+      confirmadas: sessoesAgendadas.filter(s => s.compareceu === true).length,
+      canceladas: sessoesAgendadas.filter(s => s.compareceu === false).length
+    }
+  }
 
   const fetchSessoesAgendadas = async () => {
     try {
@@ -87,6 +120,7 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
       )
 
       setSessoesAgendadas(sessoesComPagamento)
+      aplicarFiltro(sessoesComPagamento, filtroStatus)
     } catch (error) {
       console.error('Erro ao buscar sessões agendadas:', error)
     } finally {
@@ -148,6 +182,8 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
       alert('Erro ao marcar comparecimento. Tente novamente.')
     }
   }
+
+  const contadores = contarPorStatus()
 
   const handleDeleteClick = (sessao) => {
     // Se a sessão faz parte de uma recorrência, mostrar modal de escolha
@@ -243,7 +279,51 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
         </p>
       </div>
 
-      {sessoesAgendadas.length === 0 ? (
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setFiltroStatus('todas')}
+          className={`px-4 py-2 rounded-lg font-medium transition ${
+            filtroStatus === 'todas'
+              ? 'bg-primary text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Todas ({contadores.todas})
+        </button>
+        <button
+          onClick={() => setFiltroStatus('agendadas')}
+          className={`px-4 py-2 rounded-lg font-medium transition ${
+            filtroStatus === 'agendadas'
+              ? 'bg-primary text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Agendadas ({contadores.agendadas})
+        </button>
+        <button
+          onClick={() => setFiltroStatus('confirmadas')}
+          className={`px-4 py-2 rounded-lg font-medium transition ${
+            filtroStatus === 'confirmadas'
+              ? 'bg-primary text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Confirmadas ({contadores.confirmadas})
+        </button>
+        <button
+          onClick={() => setFiltroStatus('canceladas')}
+          className={`px-4 py-2 rounded-lg font-medium transition ${
+            filtroStatus === 'canceladas'
+              ? 'bg-primary text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Canceladas ({contadores.canceladas})
+        </button>
+      </div>
+
+      {sessoesFiltradas.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
           <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <p className="text-gray-600 mb-2">Nenhuma sessão agendada</p>
@@ -251,7 +331,7 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {sessoesAgendadas.map((sessao) => (
+          {sessoesFiltradas.map((sessao) => (
             <div
               key={sessao.id}
               className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition"
@@ -263,7 +343,7 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                   </div>
                   
                   <div className="flex-1">
-                    <div className="flex items-center gap-4 mb-2">
+                    <div className="flex items-center gap-4 mb-2 flex-wrap">
                       <div className="flex items-center gap-1 text-sm text-gray-600">
                         <Calendar className="w-4 h-4" />
                         <span className="font-medium">
@@ -274,7 +354,37 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                         <Clock className="w-4 h-4" />
                         <span>{sessao.hora?.slice(0, 5) || 'Não informado'}</span>
                       </div>
+                      {sessao.tipo_consulta && (
+                        <div className="flex items-center gap-1 text-sm">
+                          {sessao.tipo_consulta === 'online' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                              <Video className="w-3 h-3" />
+                              Online
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-medium">
+                              <MapPin className="w-3 h-3" />
+                              Presencial
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
+                    
+                    {sessao.tipo_consulta === 'online' && sessao.link_meet && (
+                      <div className="mb-2">
+                        <a
+                          href={sessao.link_meet}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition text-sm font-medium"
+                        >
+                          <Video className="w-4 h-4" />
+                          <span>Abrir Google Meet</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
                     
                     {sessao.recorrencia_id && (
                       <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium mb-2">

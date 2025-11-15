@@ -7,7 +7,7 @@ import NotificationBadge from './NotificationBadge'
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { signOut, profile, isAdmin } = useAuth()
+  const { signOut, profile, isAdmin, isEsteticista } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
 
   const handleLogout = async () => {
@@ -56,7 +56,9 @@ export default function Sidebar() {
       `}>
         <div className="p-4 lg:p-6 border-b border-gray-200">
           <div className="flex items-center justify-between mb-2">
-            <h1 className="text-xl lg:text-2xl font-bold text-primary">Psic Gestor</h1>
+            <h1 className="text-xl lg:text-2xl font-bold text-primary">
+              {isEsteticista ? 'Estetic Gestor' : 'Psic Gestor'}
+            </h1>
             {profile && <NotificationBadge />}
           </div>
           {profile && (

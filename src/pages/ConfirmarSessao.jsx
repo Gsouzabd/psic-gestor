@@ -204,7 +204,7 @@ export default function ConfirmarSessao() {
             {/* Informações da Sessão */}
             <div className="bg-gray-50 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary bg-opacity-10 rounded-lg">
+                <div className="p-2 bg-primary/10 rounded-lg">
                   <Calendar className="w-5 h-5 text-primary" />
                 </div>
                 <div>
@@ -215,7 +215,7 @@ export default function ConfirmarSessao() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary bg-opacity-10 rounded-lg">
+                <div className="p-2 bg-primary/10 rounded-lg">
                   <Clock className="w-5 h-5 text-primary" />
                 </div>
                 <div>

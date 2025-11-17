@@ -34,6 +34,7 @@ export default function Dashboard() {
     totalPacientes: 0,
     sessoesSemana: 0,
     pagamentosPendentes: 0,
+    sessoesHoje: 0,
     ultimasSessoes: []
   })
   const [funilPagamento, setFunilPagamento] = useState({
@@ -96,15 +97,34 @@ export default function Dashboard() {
 
       // Sessões da semana atual
       const hoje = new Date()
-      const inicioSemana = new Date(hoje.setDate(hoje.getDate() - hoje.getDay()))
-      const fimSemana = new Date(hoje.setDate(hoje.getDate() - hoje.getDay() + 6))
+      const diaSemana = hoje.getDay()
+      const diaMes = hoje.getDate()
+      const inicioSemana = new Date(hoje)
+      inicioSemana.setDate(diaMes - diaSemana)
+      const fimSemana = new Date(hoje)
+      fimSemana.setDate(diaMes - diaSemana + 6)
+      const inicioSemanaStr = inicioSemana.toISOString().split('T')[0]
+      const fimSemanaStr = fimSemana.toISOString().split('T')[0]
       
-      const { count: sessoesSemana } = await supabase
+      // Contar prontuários da semana (sessões já realizadas)
+      const { count: prontuariosSemana } = await supabase
         .from('prontuarios')
         .select('*, pacientes!inner(psicologo_id)', { count: 'exact', head: true })
         .eq('pacientes.psicologo_id', user.id)
-        .gte('data', inicioSemana.toISOString().split('T')[0])
-        .lte('data', fimSemana.toISOString().split('T')[0])
+        .gte('data', inicioSemanaStr)
+        .lte('data', fimSemanaStr)
+      
+      // Contar sessões agendadas da semana (status agendado - compareceu = null)
+      const { count: sessoesAgendadasSemana } = await supabase
+        .from('sessoes_agendadas')
+        .select('*, pacientes!inner(psicologo_id)', { count: 'exact', head: true })
+        .eq('pacientes.psicologo_id', user.id)
+        .is('compareceu', null)
+        .gte('data', inicioSemanaStr)
+        .lte('data', fimSemanaStr)
+      
+      // Total de sessões da semana = prontuários + sessões agendadas
+      const sessoesSemana = (prontuariosSemana || 0) + (sessoesAgendadasSemana || 0)
 
       // Pagamentos pendentes
       const { data: pagamentosPendentesData } = await supabase
@@ -143,6 +163,25 @@ export default function Dashboard() {
       }
 
       setFunilPagamento({ pago, pendente, atrasado })
+
+      // Sessões de hoje (usando hojeStr já declarado acima)
+      // Contar prontuários de hoje
+      const { count: prontuariosHoje } = await supabase
+        .from('prontuarios')
+        .select('*, pacientes!inner(psicologo_id)', { count: 'exact', head: true })
+        .eq('pacientes.psicologo_id', user.id)
+        .eq('data', hojeStr)
+      
+      // Contar sessões agendadas de hoje (status agendado - compareceu = null)
+      const { count: sessoesAgendadasHoje } = await supabase
+        .from('sessoes_agendadas')
+        .select('*, pacientes!inner(psicologo_id)', { count: 'exact', head: true })
+        .eq('pacientes.psicologo_id', user.id)
+        .is('compareceu', null)
+        .eq('data', hojeStr)
+      
+      // Total de sessões de hoje = prontuários + sessões agendadas
+      const sessoesHoje = (prontuariosHoje || 0) + (sessoesAgendadasHoje || 0)
 
       // Últimas sessões
       const { data: ultimasSessoes } = await supabase
@@ -189,6 +228,7 @@ export default function Dashboard() {
         totalPacientes: totalPacientes || 0,
         sessoesSemana: sessoesSemana || 0,
         pagamentosPendentes: pagamentosPendentes || 0,
+        sessoesHoje: sessoesHoje || 0,
         ultimasSessoes: ultimasSessoes || []
       })
 
@@ -504,7 +544,7 @@ export default function Dashboard() {
                 <p className="text-xs sm:text-sm font-medium text-gray-600">Total de Pacientes</p>
                 <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{stats.totalPacientes}</p>
               </div>
-              <div className="p-2 sm:p-3 bg-primary bg-opacity-10 rounded-lg flex-shrink-0">
+              <div className="p-2 sm:p-3 bg-primary/10 rounded-lg flex-shrink-0">
                 <Users className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />
               </div>
             </div>
@@ -539,8 +579,8 @@ export default function Dashboard() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div className="min-w-0 flex-1">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Últimas 5 Sessões</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{stats.ultimasSessoes.length}</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Sessões de Hoje</p>
+                <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{stats.sessoesHoje}</p>
               </div>
               <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0">
                 <Clock className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
@@ -580,7 +620,7 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between flex-wrap gap-3">
                       <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                         <div className="flex-shrink-0">
-                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary bg-opacity-10 rounded-full flex items-center justify-center">
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 rounded-full flex items-center justify-center">
                             <CalendarIcon className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
                           </div>
                         </div>

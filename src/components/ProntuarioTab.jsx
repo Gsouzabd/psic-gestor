@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Modal from './Modal'
 import SessionCard from './SessionCard'
+import ImageUpload from './ImageUpload'
 import { Plus, AlertCircle, CheckCircle } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -18,7 +19,8 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
     compareceu: true, // true = compareceu, false = não compareceu (agendamentos não são criados aqui)
     anotacoes: '',
     valor_sessao: paciente.valor_sessao || '',
-    desconto: '0'
+    desconto: '0',
+    imagens_urls: []
   })
 
   useEffect(() => {
@@ -69,7 +71,8 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
         compareceu: sessao.compareceu ?? true,
         anotacoes: sessao.anotacoes || '',
         valor_sessao: pagamento?.valor_sessao || paciente.valor_sessao || '',
-        desconto: pagamento?.desconto || '0'
+        desconto: pagamento?.desconto || '0',
+        imagens_urls: sessao.imagens_urls || []
       })
       setShowNewModal(true)
       setError('')
@@ -98,6 +101,7 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
             hora: formData.hora,
             compareceu: formData.compareceu,
             anotacoes: formData.anotacoes,
+            imagens_urls: formData.imagens_urls || [],
             updated_at: new Date().toISOString()
           })
           .eq('id', editingSessao.id)
@@ -129,7 +133,8 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
               data: dataFormatada,
               hora: formData.hora,
               compareceu: formData.compareceu,
-              anotacoes: formData.anotacoes
+              anotacoes: formData.anotacoes,
+              imagens_urls: formData.imagens_urls || []
             }
           ])
           .select()
@@ -163,7 +168,8 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
         compareceu: true,
         anotacoes: '',
         valor_sessao: paciente.valor_sessao || '',
-        desconto: '0'
+        desconto: '0',
+        imagens_urls: []
       })
       fetchSessoes()
     } catch (error) {
@@ -261,6 +267,7 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
             anotacoes: '',
             valor_sessao: paciente.valor_sessao || '',
             desconto: '0',
+            imagens_urls: [],
             isRecurring: false,
             tipoRecorrencia: 'semanal',
             dataFim: '',
@@ -353,6 +360,18 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Imagens (Opcional)
+            </label>
+            <ImageUpload
+              sessaoId={editingSessao?.id || null}
+              pacienteId={pacienteId}
+              currentImageUrls={formData.imagens_urls}
+              onImagesUploaded={(urls) => setFormData(prev => ({ ...prev, imagens_urls: urls }))}
+            />
+          </div>
+
           <div className="border-t pt-4 mt-4">
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Informações de Pagamento</h4>
             <div className="grid grid-cols-2 gap-4">
@@ -409,7 +428,8 @@ export default function ProntuarioTab({ pacienteId, paciente }) {
                   compareceu: true,
                   anotacoes: '',
                   valor_sessao: paciente.valor_sessao || '',
-                  desconto: '0'
+                  desconto: '0',
+                  imagens_urls: []
                 })
                 setError('')
               }}

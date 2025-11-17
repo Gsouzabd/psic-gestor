@@ -26,7 +26,7 @@ export default function PatientCard({ patient, onDelete }) {
 
       <div className="flex items-start gap-3 sm:gap-4">
         <div className="flex-shrink-0">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-primary bg-opacity-10 rounded-full flex items-center justify-center group-hover:bg-opacity-20 transition">
+          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-primary/10 rounded-full flex items-center justify-center group-hover:bg-primary/20 transition">
             <User className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />
           </div>
         </div>

@@ -128,7 +128,7 @@ export default function FileUpload({ pacienteId, currentFileUrl, onFileUploaded 
         <div className="border-2 border-gray-200 rounded-lg p-4 bg-gray-50">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-primary bg-opacity-10 rounded-lg">
+              <div className="p-3 bg-primary/10 rounded-lg">
                 <FileText className="w-6 h-6 text-primary" />
               </div>
               <div>

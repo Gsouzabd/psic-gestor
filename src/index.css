@@ -3,6 +3,13 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Cores padrão (Psic Gestor) */
+    --color-primary: #415347;
+    --color-secondary: #5f5c44;
+    --color-background: #f6f2e5;
+  }
+
   body {
     @apply bg-background text-gray-900;
   }

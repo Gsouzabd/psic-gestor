@@ -80,6 +80,8 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
         data,
         hora,
         paciente_id,
+        tipo_consulta,
+        link_meet,
         pacientes!inner (
           id,
           nome_completo,
@@ -134,7 +136,7 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
     const urlConfirm = `${baseUrl}/confirmar-sessao/${sessaoId}?token=${token}`
 
     // 6. Preparar payload
-    const payload = {
+    const payload: any = {
       psicologo_id: psicologoId,
       paciente_nome: paciente.nome_completo,
       paciente_telefone: paciente.telefone || '',
@@ -144,6 +146,11 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
       url_confirm: urlConfirm,
       apikey: apikey,
       instance_name: whatsappInstance.instance_name
+    }
+
+    // Incluir link do Google Meet se a sessão for online e tiver o link
+    if (sessao.tipo_consulta === 'online' && sessao.link_meet) {
+      payload.link_meet = sessao.link_meet
     }
 
     // 7. Obter URL do webhook global

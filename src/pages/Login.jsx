@@ -1,16 +1,33 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useDomainDetection } from '../hooks/useDomainDetection'
 import { LogIn, AlertCircle, User, Scissors } from 'lucide-react'
 
 export default function Login() {
   const navigate = useNavigate()
   const { signIn } = useAuth()
+  const { isEsteticGestor, isPsicGestor } = useDomainDetection()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [systemType, setSystemType] = useState('psicgestor')
+  
+  // Determinar o tipo de sistema baseado no domínio
+  const detectedSystemType = isEsteticGestor ? 'esteticgestor' : 'psicgestor'
+  const [systemType, setSystemType] = useState(detectedSystemType)
+  
+  // Mostrar tabs apenas em localhost (desenvolvimento)
+  // Em produção, o sistema é determinado pelo domínio
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  const showTabs = isLocalhost
+  
+  // Sincronizar systemType com o domínio quando não estiver em localhost
+  useEffect(() => {
+    if (!isLocalhost) {
+      setSystemType(detectedSystemType)
+    }
+  }, [isLocalhost, detectedSystemType])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -41,35 +58,37 @@ export default function Login() {
             <p className="text-gray-600">Entre na sua conta</p>
           </div>
 
-          {/* Tabs de seleção do sistema */}
-          <div className="mb-6">
-            <div className="flex bg-gray-100 rounded-lg p-1">
-              <button
-                type="button"
-                onClick={() => setSystemType('psicgestor')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md font-medium transition ${
-                  systemType === 'psicgestor'
-                    ? 'bg-white text-primary shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <User className="w-4 h-4" />
-                <span>Psic Gestor</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSystemType('esteticgestor')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md font-medium transition ${
-                  systemType === 'esteticgestor'
-                    ? 'bg-white text-primary shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Scissors className="w-4 h-4" />
-                <span>Estetic Gestor</span>
-              </button>
+          {/* Tabs de seleção do sistema - apenas em localhost (desenvolvimento) */}
+          {showTabs && (
+            <div className="mb-6">
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                <button
+                  type="button"
+                  onClick={() => setSystemType('psicgestor')}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md font-medium transition ${
+                    systemType === 'psicgestor'
+                      ? 'bg-white text-primary shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                  <span>Psic Gestor</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSystemType('esteticgestor')}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md font-medium transition ${
+                    systemType === 'esteticgestor'
+                      ? 'bg-white text-primary shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Scissors className="w-4 h-4" />
+                  <span>Estetic Gestor</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {error && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">

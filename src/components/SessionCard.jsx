@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Calendar, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Edit, Repeat } from 'lucide-react'
+import { Calendar, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Edit, Repeat, Maximize2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -12,6 +12,7 @@ const parseLocalDate = (dateString) => {
 
 export default function SessionCard({ sessao, onDelete, onEdit }) {
   const [expanded, setExpanded] = useState(false)
+  const [selectedImage, setSelectedImage] = useState(null)
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition">
@@ -98,6 +99,32 @@ export default function SessionCard({ sessao, onDelete, onEdit }) {
           ) : (
             <p className="text-sm text-gray-500 italic mb-4">Sem anotações registradas</p>
           )}
+
+          {sessao.imagens_urls && sessao.imagens_urls.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-900 mb-3">Imagens da Sessão:</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {sessao.imagens_urls.map((url, index) => (
+                  <div
+                    key={index}
+                    className="relative group cursor-pointer"
+                    onClick={() => setSelectedImage(url)}
+                  >
+                    <div className="aspect-square rounded-lg overflow-hidden border-2 border-gray-200 bg-gray-100">
+                      <img
+                        src={url}
+                        alt={`Imagem ${index + 1} da sessão`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity rounded-lg flex items-center justify-center">
+                      <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           
           <div className="flex justify-end gap-2">
             {onEdit && (
@@ -106,7 +133,7 @@ export default function SessionCard({ sessao, onDelete, onEdit }) {
                   e.stopPropagation()
                   onEdit(sessao)
                 }}
-                className="flex items-center gap-2 px-4 py-2 text-primary hover:bg-primary hover:bg-opacity-10 rounded-lg transition text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 text-primary hover:bg-primary/10 rounded-lg transition text-sm font-medium"
               >
                 <Edit className="w-4 h-4" />
                 Editar Sessão
@@ -122,6 +149,29 @@ export default function SessionCard({ sessao, onDelete, onEdit }) {
               <Trash2 className="w-4 h-4" />
               Excluir Sessão
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de visualização ampliada da imagem */}
+      {selectedImage && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          onClick={() => setSelectedImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] w-full">
+            <button
+              onClick={() => setSelectedImage(null)}
+              className="absolute top-4 right-4 p-2 bg-white rounded-full hover:bg-gray-100 transition z-10"
+            >
+              <XCircle className="w-6 h-6 text-gray-700" />
+            </button>
+            <img
+              src={selectedImage}
+              alt="Imagem ampliada"
+              className="w-full h-full object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
         </div>
       )}

@@ -29,7 +29,7 @@ export default function ProntuariosEsteticosTab({ pacienteId, paciente }) {
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex-1 min-w-[120px] px-4 sm:px-6 py-3 sm:py-4 text-center font-medium transition flex items-center justify-center gap-2 text-xs sm:text-sm lg:text-base ${
                     activeTab === tab.id
-                      ? 'border-b-2 border-primary text-primary bg-primary bg-opacity-5'
+                      ? 'border-b-2 border-primary text-primary bg-primary/10'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                   }`}
                 >

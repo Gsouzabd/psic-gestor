@@ -518,7 +518,7 @@ export default function Admin() {
                           </button>
                           <button
                             onClick={() => handleEdit(psicologo)}
-                            className="text-primary hover:text-primary-dark transition p-2 hover:bg-primary bg-opacity-10 rounded-lg"
+                            className="text-primary hover:text-primary-dark transition p-2 hover:bg-primary/10 rounded-lg"
                             title="Editar"
                           >
                             <Edit className="w-4 h-4" />

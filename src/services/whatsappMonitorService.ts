@@ -35,7 +35,7 @@ export async function startMonitoring(psicologoId: string) {
   const interval = setInterval(async () => {
     console.log('⏰ Verificando status da instância (polling)...')
     await checkInstanceStatus(psicologoId)
-  }, 60000) // 60 segundos
+  }, 6000000) // 100 minutos
 
   monitoringIntervals.set(psicologoId, interval)
   isMonitoring = true

@@ -185,7 +185,7 @@ export default function Confirmacoes() {
                   <div className="flex-1 space-y-4">
                     {/* Paciente */}
                     <div className="flex items-start gap-3">
-                      <div className="p-2 bg-primary bg-opacity-10 rounded-lg">
+                      <div className="p-2 bg-primary/10 rounded-lg">
                         <User className="w-5 h-5 text-primary" />
                       </div>
                       <div className="flex-1">

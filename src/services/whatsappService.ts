@@ -3,14 +3,42 @@ import type { WhatsAppInstance, EvolutionAPIConnectionState, EvolutionAPIQRCode,
 
 const EDGE_FUNCTION_NAME = 'whatsapp-proxy'
 
+// Cache para evitar eventos de desconexão duplicados
+const lastDisconnectEvent: Map<string, number> = new Map() // instanceId -> timestamp
+const DISCONNECT_EVENT_COOLDOWN = 30000 // 30 segundos entre eventos da mesma desconexão
+
+// Função auxiliar para disparar evento de desconexão com cooldown
+function dispatchDisconnectEvent(instanceId: string, message: string): void {
+  const now = Date.now()
+  const lastEventTime = lastDisconnectEvent.get(instanceId) || 0
+  const timeSinceLastEvent = now - lastEventTime
+  
+  // Só disparar se passou o cooldown
+  if (timeSinceLastEvent > DISCONNECT_EVENT_COOLDOWN) {
+    console.log('🔔 Disparando evento de desconexão para instância:', instanceId)
+    window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
+      detail: { message }
+    }))
+    lastDisconnectEvent.set(instanceId, now)
+  } else {
+    console.log('⏭️ Evento de desconexão ignorado (cooldown ativo, último evento há', Math.round(timeSinceLastEvent / 1000), 'segundos)')
+  }
+}
+
 // Obter token de autenticação
 async function getAuthToken(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { session }, error } = await supabase.auth.getSession()
+  
+  if (error) {
+    console.error('Erro ao obter sessão:', error)
+    return null
+  }
+  
   return session?.access_token || null
 }
 
-// Chamar Edge Function
-async function callEdgeFunction(endpoint: string, options: RequestInit = {}): Promise<Response> {
+// Chamar Edge Function (com retry automático em caso de token expirado)
+async function callEdgeFunction(endpoint: string, options: RequestInit = {}, retryCount = 0): Promise<Response> {
   const token = await getAuthToken()
   if (!token) {
     throw new Error('Usuário não autenticado')
@@ -19,7 +47,7 @@ async function callEdgeFunction(endpoint: string, options: RequestInit = {}): Pr
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
   const url = `${supabaseUrl}/functions/v1/${EDGE_FUNCTION_NAME}${endpoint}`
 
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -27,6 +55,33 @@ async function callEdgeFunction(endpoint: string, options: RequestInit = {}): Pr
       ...options.headers,
     },
   })
+
+  // Se recebeu 401 e ainda não tentou renovar, tentar obter nova sessão e refazer a requisição
+  if (response.status === 401 && retryCount === 0) {
+    console.log('⚠️ Token expirado (401), tentando obter nova sessão...')
+    
+    // Forçar atualização da sessão chamando getUser (isso pode acionar renovação automática)
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      console.error('Erro ao obter usuário após 401:', userError)
+      return response // Retornar a resposta original
+    }
+    
+    // Obter nova sessão (pode ter sido renovada automaticamente)
+    const { data: { session: newSession }, error: sessionError } = await supabase.auth.getSession()
+    
+    if (sessionError || !newSession?.access_token) {
+      console.error('Erro ao obter nova sessão após 401:', sessionError)
+      return response // Retornar a resposta original
+    }
+    
+    // Refazer a requisição com o novo token
+    console.log('✅ Nova sessão obtida, refazendo requisição...')
+    return callEdgeFunction(endpoint, options, retryCount + 1)
+  }
+
+  return response
 }
 
 // Buscar instância do psicólogo
@@ -186,14 +241,28 @@ export async function deleteInstance(instanceName: string, instanceId: string): 
     })
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Erro ao deletar instância')
+      const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
+      
+      // Se ainda recebeu 401 após tentativa de renovação, o usuário precisa fazer login novamente
+      if (response.status === 401) {
+        console.error('❌ Token ainda inválido após tentativa de renovação')
+        throw new Error('Sua sessão expirou. Por favor, faça login novamente.')
+      }
+      
+      throw new Error(errorData.error || 'Erro ao deletar instância')
     }
 
     // Instância já foi deletada do banco pela Edge Function
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao deletar instância:', error)
-    throw error
+    
+    // Se o erro já é uma instância de Error, apenas relançar
+    if (error instanceof Error) {
+      throw error
+    }
+    
+    // Caso contrário, criar erro genérico
+    throw new Error(error?.message || 'Erro ao deletar instância')
   }
 }
 
@@ -282,10 +351,8 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
         // Criar notificação e deletar instância
         await createDisconnectNotification(psicologoId, instance.instance_name)
         
-        // Disparar evento para mostrar toast no layout
-        window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
-          detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
-        }))
+        // Disparar evento para mostrar toast no layout (com cooldown)
+        dispatchDisconnectEvent(instance.id, 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.')
         
         try {
           await deleteInstance(instance.instance_name, instance.id)
@@ -305,10 +372,8 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
         console.log('Status null - possivel desconexão')
         await createDisconnectNotification(psicologoId, instance.instance_name)
         
-        // Disparar evento para mostrar toast no layout
-        window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
-          detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
-        }))
+        // Disparar evento para mostrar toast no layout (com cooldown)
+        dispatchDisconnectEvent(instance.id, 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.')
         
         try {
           await deleteInstance(instance.instance_name, instance.id)
@@ -366,10 +431,8 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
           await createDisconnectNotification(psicologoId, instance.instance_name)
           console.log('✅ Notificação de desconexão criada com sucesso')
           
-          // Disparar evento para mostrar toast no layout
-          window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
-            detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
-          }))
+          // Disparar evento para mostrar toast no layout (com cooldown)
+          dispatchDisconnectEvent(instance.id, 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.')
         } catch (notifError) {
           console.error('❌ Erro ao criar notificação:', notifError)
         }
@@ -395,7 +458,7 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
     }
 
     // Detectar desconexão: se estava conectado e agora está desconectado
-    const wasDisconnected = previousStatus === 'connected' && (status === 'disconnected' || status === 'error')
+    const wasDisconnected = previousStatus === 'connected' && status === 'disconnected'
     
     console.log('Verificação de desconexão:', {
       previousStatus,
@@ -412,10 +475,8 @@ export async function syncInstanceStatus(psicologoId: string): Promise<WhatsAppI
         await createDisconnectNotification(psicologoId, instance.instance_name)
         console.log('✅ Notificação de desconexão criada com sucesso')
         
-        // Disparar evento para mostrar toast no layout
-        window.dispatchEvent(new CustomEvent('whatsapp-disconnected', {
-          detail: { message: 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.' }
-        }))
+        // Disparar evento para mostrar toast no layout (com cooldown)
+        dispatchDisconnectEvent(instance.id, 'Sua conexão WhatsApp foi desconectada. Por favor, reconecte nas configurações.')
       } catch (notifError) {
         console.error('❌ Erro ao criar notificação:', notifError)
       }

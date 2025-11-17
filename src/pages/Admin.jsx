@@ -308,6 +308,72 @@ export default function Admin() {
     }
   }
 
+  // Carregar configuração Webhook
+  const loadWebhookConfig = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('system_config')
+        .select('key, value')
+        .eq('key', 'webhook_url')
+        .maybeSingle()
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        throw error
+      }
+
+      if (data?.value) {
+        setWebhookUrl(data.value)
+      }
+    } catch (error) {
+      console.error('Erro ao carregar configuração Webhook:', error)
+    }
+  }
+
+  // Salvar configuração Webhook
+  const saveWebhookConfig = async () => {
+    setSavingWebhook(true)
+    setError('')
+
+    try {
+      // Verificar se já existe registro
+      const { data: existing, error: checkError } = await supabase
+        .from('system_config')
+        .select('key')
+        .eq('key', 'webhook_url')
+        .maybeSingle()
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError
+      }
+
+      if (existing) {
+        // Atualizar existente
+        const { error: updateError } = await supabase
+          .from('system_config')
+          .update({ value: webhookUrl })
+          .eq('key', 'webhook_url')
+
+        if (updateError) throw updateError
+      } else {
+        // Criar novo registro
+        const { error: insertError } = await supabase
+          .from('system_config')
+          .insert({ key: 'webhook_url', value: webhookUrl })
+
+        if (insertError) throw insertError
+      }
+
+      success('Configuração Webhook salva com sucesso!')
+    } catch (error) {
+      console.error('Erro ao salvar configuração Webhook:', error)
+      const message = error?.message || 'Erro ao salvar configuração. Tente novamente.'
+      showError(message)
+      setError(message)
+    } finally {
+      setSavingWebhook(false)
+    }
+  }
+
   if (loading) {
     return (
       <Layout>

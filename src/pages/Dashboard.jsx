@@ -5,13 +5,18 @@ import Calendar from '../components/Calendar'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react'
+import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle, MessageSquare, Video, MapPin, ExternalLink } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import RecurrenceOptions from '../components/RecurrenceOptions'
 import { generateRecurringAppointments } from '../utils/recurrence'
 import { notifyPatient } from '../services/notificationService'
 import { useToast } from '../contexts/ToastContext'
+
+// Função para abrir Google Meet em nova aba para criar reunião
+const abrirGoogleMeet = () => {
+  window.open('https://meet.google.com/new', '_blank')
+}
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -31,7 +36,15 @@ export default function Dashboard() {
     pagamentosPendentes: 0,
     ultimasSessoes: []
   })
+  const [funilPagamento, setFunilPagamento] = useState({
+    pago: 0,
+    pendente: 0,
+    atrasado: 0
+  })
   const [calendarSessions, setCalendarSessions] = useState([])
+  const [sessoesAgendadas, setSessoesAgendadas] = useState([])
+  const [sessoesFiltradas, setSessoesFiltradas] = useState([])
+  const [filtroStatus, setFiltroStatus] = useState('todas')
   const [selectedSession, setSelectedSession] = useState(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [showAgendamentoModal, setShowAgendamentoModal] = useState(false)
@@ -47,7 +60,9 @@ export default function Dashboard() {
     isRecurring: false,
     tipoRecorrencia: 'semanal',
     dataFim: '',
-    criarPrevisao: false
+    criarPrevisao: false,
+    tipo_consulta: 'presencial',
+    link_meet: ''
   })
   const [savingAgendamento, setSavingAgendamento] = useState(false)
   const [agendamentoError, setAgendamentoError] = useState('')
@@ -100,6 +115,35 @@ export default function Dashboard() {
 
       const pagamentosPendentes = pagamentosPendentesData?.reduce((sum, p) => sum + parseFloat(p.valor_final || 0), 0) || 0
 
+      // Funil de pagamento
+      const hojeStr = new Date().toISOString().split('T')[0]
+      const { data: todosPagamentos } = await supabase
+        .from('pagamentos')
+        .select('valor_final, pago, data, pacientes!inner(psicologo_id)')
+        .eq('pacientes.psicologo_id', user.id)
+
+      let pago = 0
+      let pendente = 0
+      let atrasado = 0
+
+      if (todosPagamentos) {
+        todosPagamentos.forEach(pagamento => {
+          const valor = parseFloat(pagamento.valor_final) || 0
+          if (pagamento.pago === true) {
+            pago += valor
+          } else {
+            const dataPagamento = pagamento.data
+            if (dataPagamento && dataPagamento < hojeStr) {
+              atrasado += valor
+            } else {
+              pendente += valor
+            }
+          }
+        })
+      }
+
+      setFunilPagamento({ pago, pendente, atrasado })
+
       // Últimas sessões
       const { data: ultimasSessoes } = await supabase
         .from('prontuarios')
@@ -111,11 +155,14 @@ export default function Dashboard() {
 
       // Buscar sessões agendadas e prontuários para o calendário
       // Buscar sessões agendadas (incluindo campos de confirmação do paciente)
-      const { data: sessoesAgendadas } = await supabase
+      const { data: sessoesAgendadasData } = await supabase
         .from('sessoes_agendadas')
-        .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id, confirmada_pelo_paciente, confirmada_em')
+        .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id, confirmada_pelo_paciente, confirmada_em, tipo_consulta, link_meet')
         .eq('pacientes.psicologo_id', user.id)
         .order('data', { ascending: true })
+      
+      setSessoesAgendadas(sessoesAgendadasData || [])
+      aplicarFiltroSessoes(sessoesAgendadasData || [], filtroStatus)
 
       // Buscar prontuários (sessões que já aconteceram)
       const { data: prontuarios } = await supabase
@@ -126,7 +173,7 @@ export default function Dashboard() {
         .order('data', { ascending: true })
 
       // Combinar sessões agendadas e prontuários
-      const sessoesAgendadasComNome = sessoesAgendadas?.map(s => ({
+      const sessoesAgendadasComNome = sessoesAgendadasData?.map(s => ({
         ...s,
         paciente_nome: s.pacientes.nome_completo
       })) || []
@@ -152,6 +199,37 @@ export default function Dashboard() {
       setLoading(false)
     }
   }, [user])
+
+  useEffect(() => {
+    aplicarFiltroSessoes(sessoesAgendadas, filtroStatus)
+  }, [filtroStatus, sessoesAgendadas])
+
+  const aplicarFiltroSessoes = (sessoes, filtro) => {
+    let filtradas = sessoes
+    switch (filtro) {
+      case 'agendadas':
+        filtradas = sessoes.filter(s => s.compareceu === null)
+        break
+      case 'confirmadas':
+        filtradas = sessoes.filter(s => s.compareceu === true)
+        break
+      case 'canceladas':
+        filtradas = sessoes.filter(s => s.compareceu === false)
+        break
+      default:
+        filtradas = sessoes
+    }
+    setSessoesFiltradas(filtradas)
+  }
+
+  const contarSessoesPorStatus = () => {
+    return {
+      todas: sessoesAgendadas.length,
+      agendadas: sessoesAgendadas.filter(s => s.compareceu === null).length,
+      confirmadas: sessoesAgendadas.filter(s => s.compareceu === true).length,
+      canceladas: sessoesAgendadas.filter(s => s.compareceu === false).length
+    }
+  }
 
   useEffect(() => {
     if (user) {
@@ -224,7 +302,9 @@ export default function Dashboard() {
       isRecurring: false,
       tipoRecorrencia: 'semanal',
       dataFim: defaultEndDateString,
-      criarPrevisao: false
+      criarPrevisao: false,
+      tipo_consulta: 'presencial',
+      link_meet: ''
     })
     setShowAgendamentoModal(true)
     setAgendamentoError('')
@@ -288,6 +368,17 @@ export default function Dashboard() {
 
         if (recorrenciaError) throw recorrenciaError
 
+        // Validar link do Meet se for online
+        if (agendamentoForm.tipo_consulta === 'online' && !agendamentoForm.link_meet) {
+          setAgendamentoError('Para consultas online, é necessário informar o link do Google Meet.')
+          setSavingAgendamento(false)
+          return
+        }
+        
+        const linkMeet = agendamentoForm.tipo_consulta === 'online' 
+          ? agendamentoForm.link_meet
+          : null
+
         // Gerar todos os agendamentos recorrentes
         const { sessoesAgendadas, errors } = await generateRecurringAppointments({
           dataInicio: agendamentoForm.data,
@@ -297,7 +388,9 @@ export default function Dashboard() {
           pacienteId: agendamentoForm.paciente_id,
           recorrenciaId: recorrencia.id,
           valorSessao: valorSessao,
-          criarPrevisao: agendamentoForm.criarPrevisao || false
+          criarPrevisao: agendamentoForm.criarPrevisao || false,
+          tipoConsulta: agendamentoForm.tipo_consulta,
+          linkMeet: linkMeet
         })
 
         if (errors.length > 0) {
@@ -305,6 +398,17 @@ export default function Dashboard() {
           setAgendamentoError(`Agendamentos criados, mas alguns erros ocorreram: ${errors.length} erro(s)`)
         }
       } else {
+        // Validar link do Meet se for online
+        if (agendamentoForm.tipo_consulta === 'online' && !agendamentoForm.link_meet) {
+          setAgendamentoError('Para consultas online, é necessário informar o link do Google Meet.')
+          setSavingAgendamento(false)
+          return
+        }
+        
+        const linkMeet = agendamentoForm.tipo_consulta === 'online' 
+          ? agendamentoForm.link_meet
+          : null
+
         // Criar agendamento único em sessoes_agendadas
         const { data: sessaoAgendada, error: sessaoError } = await supabase
           .from('sessoes_agendadas')
@@ -314,7 +418,9 @@ export default function Dashboard() {
               data: agendamentoForm.data,
               hora: agendamentoForm.hora,
               compareceu: null, // Ainda não foi marcado
-              anotacoes: ''
+              anotacoes: '',
+              tipo_consulta: agendamentoForm.tipo_consulta,
+              link_meet: linkMeet
             }
           ])
           .select()
@@ -519,6 +625,48 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {/* Funil de Pagamento */}
+        <div>
+          <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4">Funil de Pagamento</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-gray-600">Pago</p>
+                <div className="p-2 bg-green-100 rounded-lg">
+                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+                </div>
+              </div>
+              <p className="text-2xl sm:text-3xl font-bold text-green-600">
+                R$ {funilPagamento.pago.toFixed(2).replace('.', ',')}
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-gray-600">Pendente</p>
+                <div className="p-2 bg-yellow-100 rounded-lg">
+                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                </div>
+              </div>
+              <p className="text-2xl sm:text-3xl font-bold text-yellow-600">
+                R$ {funilPagamento.pendente.toFixed(2).replace('.', ',')}
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-gray-600">Atrasado</p>
+                <div className="p-2 bg-red-100 rounded-lg">
+                  <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600" />
+                </div>
+              </div>
+              <p className="text-2xl sm:text-3xl font-bold text-red-600">
+                R$ {funilPagamento.atrasado.toFixed(2).replace('.', ',')}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Modal de Detalhes da Sessão */}
@@ -546,6 +694,38 @@ export default function Dashboard() {
                 <p className="text-gray-900">{selectedSession.hora?.slice(0, 5)}</p>
               </div>
             </div>
+            {selectedSession.tipo_consulta && (
+              <div>
+                <label className="text-sm font-medium text-gray-600">Tipo de Consulta</label>
+                <div className="mt-1">
+                  {selectedSession.tipo_consulta === 'online' ? (
+                    <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-100 text-purple-800 rounded-lg">
+                      <Video className="w-4 h-4" />
+                      Online
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-800 rounded-lg">
+                      <MapPin className="w-4 h-4" />
+                      Presencial
+                    </span>
+                  )}
+                </div>
+                {selectedSession.tipo_consulta === 'online' && selectedSession.link_meet && (
+                  <div className="mt-2">
+                    <a
+                      href={selectedSession.link_meet}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition text-sm font-medium"
+                    >
+                      <Video className="w-4 h-4" />
+                      <span>Abrir Google Meet</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium text-gray-600">Status</label>
               <div className="mt-1 space-y-2">
@@ -776,6 +956,59 @@ export default function Dashboard() {
               ))}
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Tipo de Consulta *
+            </label>
+            <select
+              value={agendamentoForm.tipo_consulta}
+              onChange={(e) => {
+                const tipo = e.target.value
+                setAgendamentoForm(prev => ({ 
+                  ...prev, 
+                  tipo_consulta: tipo,
+                  link_meet: tipo === 'presencial' ? '' : prev.link_meet
+                }))
+              }}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="presencial">Presencial</option>
+              <option value="online">Online</option>
+            </select>
+          </div>
+
+          {agendamentoForm.tipo_consulta === 'online' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Link do Google Meet *
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={agendamentoForm.link_meet}
+                  onChange={(e) => setAgendamentoForm(prev => ({ ...prev, link_meet: e.target.value }))}
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                  placeholder="https://meet.google.com/xxx-xxxx-xxx"
+                  required={agendamentoForm.tipo_consulta === 'online'}
+                />
+                <button
+                  type="button"
+                  onClick={abrirGoogleMeet}
+                  className="px-4 py-3 bg-primary text-white rounded-lg hover:bg-opacity-90 transition font-medium flex items-center gap-2"
+                  title="Abrir Google Meet para criar nova reunião"
+                >
+                  <Video className="w-4 h-4" />
+                  <span className="hidden sm:inline">Criar Reunião</span>
+                  <span className="sm:hidden">Criar</span>
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Clique em "Criar Reunião" para abrir o Google Meet e criar uma nova reunião. Depois, copie e cole o link aqui.
+              </p>
+            </div>
+          )}
 
           <RecurrenceOptions
             isRecurring={agendamentoForm.isRecurring}

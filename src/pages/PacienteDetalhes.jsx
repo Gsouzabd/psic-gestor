@@ -3,16 +3,19 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import Layout from '../components/Layout'
 import DadosPessoaisTab from '../components/DadosPessoaisTab'
 import AnamneseTab from '../components/AnamneseTab'
+import ProntuariosEsteticosTab from '../components/ProntuariosEsteticosTab'
 import ProntuarioTab from '../components/ProntuarioTab'
 import PagamentosTab from '../components/PagamentosTab'
 import SessoesAgendadasTab from '../components/SessoesAgendadasTab'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, User, FileText, DollarSign, Trash2, UserCircle, Calendar } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import { ArrowLeft, User, FileText, DollarSign, Trash2, UserCircle, Calendar, ClipboardList } from 'lucide-react'
 
 export default function PacienteDetalhes() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { isEsteticista, isPsicologo } = useAuth()
   const [paciente, setPaciente] = useState(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'dados')
@@ -23,10 +26,13 @@ export default function PacienteDetalhes() {
 
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab && ['dados', 'anamnese', 'prontuario', 'pagamentos', 'sessoes-agendadas'].includes(tab)) {
+    const validTabs = isEsteticista 
+      ? ['dados', 'prontuarios', 'prontuario', 'pagamentos', 'sessoes-agendadas']
+      : ['dados', 'anamnese', 'prontuario', 'pagamentos', 'sessoes-agendadas']
+    if (tab && validTabs.includes(tab)) {
       setActiveTab(tab)
     }
-  }, [searchParams])
+  }, [searchParams, isEsteticista])
 
   const fetchPaciente = async () => {
     try {
@@ -87,11 +93,21 @@ export default function PacienteDetalhes() {
         .delete()
         .eq('paciente_id', id)
 
-      // Deletar anamnese
-      await supabase
-        .from('anamneses')
-        .delete()
-        .eq('paciente_id', id)
+      // Deletar anamnese (se psicólogo)
+      if (isPsicologo) {
+        await supabase
+          .from('anamneses')
+          .delete()
+          .eq('paciente_id', id)
+      }
+
+      // Deletar avaliações estéticas (se esteticista)
+      if (isEsteticista) {
+        await supabase.from('avaliacao_geral').delete().eq('paciente_id', id)
+        await supabase.from('avaliacao_corporal').delete().eq('paciente_id', id)
+        await supabase.from('avaliacao_facial').delete().eq('paciente_id', id)
+        await supabase.from('avaliacao_capilar').delete().eq('paciente_id', id)
+      }
 
       // Deletar paciente
       const { error } = await supabase
@@ -109,13 +125,23 @@ export default function PacienteDetalhes() {
     }
   }
 
-  const tabs = [
-    { id: 'dados', label: 'Dados Pessoais', icon: UserCircle },
-    { id: 'anamnese', label: 'Anamnese', icon: User },
-    { id: 'prontuario', label: 'Prontuário', icon: FileText },
-    { id: 'sessoes-agendadas', label: 'Sessões Agendadas', icon: Calendar },
-    { id: 'pagamentos', label: 'Pagamentos', icon: DollarSign },
-  ]
+  // Definir tabs baseado no tipo de usuário
+  // Por padrão, assume psicólogo (compatibilidade com sistema existente)
+  const tabs = isEsteticista === true
+    ? [
+        { id: 'dados', label: 'Dados Pessoais', icon: UserCircle },
+        { id: 'prontuarios', label: 'Prontuários', icon: ClipboardList },
+        { id: 'prontuario', label: 'Sessões Finalizadas', icon: FileText },
+        { id: 'sessoes-agendadas', label: 'Sessões Agendadas', icon: Calendar },
+        { id: 'pagamentos', label: 'Pagamentos', icon: DollarSign },
+      ]
+    : [
+        { id: 'dados', label: 'Dados Pessoais', icon: UserCircle },
+        { id: 'anamnese', label: 'Anamnese', icon: User },
+        { id: 'prontuario', label: 'Sessões Finalizadas', icon: FileText },
+        { id: 'sessoes-agendadas', label: 'Sessões Agendadas', icon: Calendar },
+        { id: 'pagamentos', label: 'Pagamentos', icon: DollarSign },
+      ]
 
   if (loading) {
     return (
@@ -192,7 +218,8 @@ export default function PacienteDetalhes() {
 
           <div className="p-4 sm:p-6">
             {activeTab === 'dados' && <DadosPessoaisTab pacienteId={id} paciente={paciente} onUpdate={fetchPaciente} />}
-            {activeTab === 'anamnese' && <AnamneseTab pacienteId={id} paciente={paciente} />}
+            {activeTab === 'anamnese' && isPsicologo && <AnamneseTab pacienteId={id} paciente={paciente} />}
+            {activeTab === 'prontuarios' && isEsteticista && <ProntuariosEsteticosTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'prontuario' && <ProntuarioTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'sessoes-agendadas' && <SessoesAgendadasTab pacienteId={id} paciente={paciente} />}
             {activeTab === 'pagamentos' && <PagamentosTab pacienteId={id} paciente={paciente} />}

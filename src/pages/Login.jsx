@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogIn, AlertCircle } from 'lucide-react'
+import { LogIn, AlertCircle, User, Scissors } from 'lucide-react'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -10,6 +10,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [systemType, setSystemType] = useState('psicgestor')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -34,8 +35,40 @@ export default function Login() {
             <div className="inline-flex items-center justify-center w-16 h-16 bg-primary rounded-full mb-4">
               <LogIn className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-primary mb-2">Psic Gestor</h1>
+            <h1 className="text-3xl font-bold text-primary mb-2">
+              {systemType === 'psicgestor' ? 'Psic Gestor' : 'Estetic Gestor'}
+            </h1>
             <p className="text-gray-600">Entre na sua conta</p>
+          </div>
+
+          {/* Tabs de seleção do sistema */}
+          <div className="mb-6">
+            <div className="flex bg-gray-100 rounded-lg p-1">
+              <button
+                type="button"
+                onClick={() => setSystemType('psicgestor')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md font-medium transition ${
+                  systemType === 'psicgestor'
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <User className="w-4 h-4" />
+                <span>Psic Gestor</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSystemType('esteticgestor')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md font-medium transition ${
+                  systemType === 'esteticgestor'
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Scissors className="w-4 h-4" />
+                <span>Estetic Gestor</span>
+              </button>
+            </div>
           </div>
 
           {error && (

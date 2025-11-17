@@ -107,12 +107,18 @@ export const AuthProvider = ({ children }) => {
   }
 
   const isAdmin = profile?.role === 'admin_master'
+  const isPsicologo = profile?.role === 'psicologo'
+  const isEsteticista = profile?.role === 'esteticista'
+  const userType = profile?.role || null
 
   const value = {
     user,
     profile,
     loading,
     isAdmin,
+    isPsicologo,
+    isEsteticista,
+    userType,
     signUp,
     signIn,
     signOut,

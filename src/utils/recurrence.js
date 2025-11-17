@@ -39,6 +39,8 @@ export function calculateRecurrenceDates(dataInicio, tipoRecorrencia, dataFim) {
  * @param {string} params.recorrenciaId - ID da recorrência
  * @param {number} params.valorSessao - Valor da sessão
  * @param {boolean} params.criarPrevisao - Se true, cria pagamentos com previsao=true
+ * @param {string} params.tipoConsulta - 'presencial' ou 'online'
+ * @param {string} params.linkMeet - Link do Google Meet (opcional)
  * @returns {Promise<{sessoesAgendadas: string[], errors: Error[]}>}
  */
 export async function generateRecurringAppointments({
@@ -49,7 +51,9 @@ export async function generateRecurringAppointments({
   pacienteId,
   recorrenciaId,
   valorSessao = 0,
-  criarPrevisao = false
+  criarPrevisao = false,
+  tipoConsulta = 'presencial',
+  linkMeet = null
 }) {
   const dates = calculateRecurrenceDates(dataInicio, tipoRecorrencia, dataFim)
   const sessoesAgendadasIds = []
@@ -69,7 +73,9 @@ export async function generateRecurringAppointments({
             hora: hora,
             compareceu: null, // Ainda não foi marcado
             anotacoes: '',
-            recorrencia_id: recorrenciaId
+            recorrencia_id: recorrenciaId,
+            tipo_consulta: tipoConsulta,
+            link_meet: linkMeet
           }
         ])
         .select()

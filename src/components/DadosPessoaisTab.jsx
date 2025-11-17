@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../contexts/ToastContext'
-import { Save } from 'lucide-react'
+import { Save, Loader2 } from 'lucide-react'
+import { buscarCEP, formatarCEP } from '../utils/cepService'
 
 export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
   const [loading, setLoading] = useState(false)
@@ -15,10 +16,16 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
     telefone: '',
     email: '',
     endereco: '',
+    cep: '',
+    rua: '',
+    bairro: '',
+    cidade: '',
+    estado: '',
     profissao: '',
     escolaridade: '',
     valor_sessao: ''
   })
+  const [buscandoCEP, setBuscandoCEP] = useState(false)
 
   useEffect(() => {
     if (paciente) {
@@ -30,6 +37,11 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
         telefone: paciente.telefone || '',
         email: paciente.email || '',
         endereco: paciente.endereco || '',
+        cep: paciente.cep || '',
+        rua: paciente.rua || '',
+        bairro: paciente.bairro || '',
+        cidade: paciente.cidade || '',
+        estado: paciente.estado || '',
         profissao: paciente.profissao || '',
         escolaridade: paciente.escolaridade || '',
         valor_sessao: paciente.valor_sessao || ''
@@ -45,6 +57,37 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
     }))
   }
 
+  const handleCEPChange = (e) => {
+    const { value } = e.target
+    const cepFormatado = formatarCEP(value)
+    setFormData(prev => ({
+      ...prev,
+      cep: cepFormatado
+    }))
+  }
+
+  const handleCEPBlur = async () => {
+    const cepLimpo = formData.cep.replace(/\D/g, '')
+    if (cepLimpo.length === 8) {
+      setBuscandoCEP(true)
+      try {
+        const dados = await buscarCEP(formData.cep)
+        setFormData(prev => ({
+          ...prev,
+          rua: dados.rua,
+          bairro: dados.bairro,
+          cidade: dados.cidade,
+          estado: dados.estado
+        }))
+        success('Endereço preenchido automaticamente!')
+      } catch (error) {
+        showError(error.message || 'Erro ao buscar CEP')
+      } finally {
+        setBuscandoCEP(false)
+      }
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
@@ -58,6 +101,11 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
         telefone: formData.telefone || null,
         email: formData.email || null,
         endereco: formData.endereco || null,
+        cep: formData.cep || null,
+        rua: formData.rua || null,
+        bairro: formData.bairro || null,
+        cidade: formData.cidade || null,
+        estado: formData.estado || null,
         profissao: formData.profissao || null,
         escolaridade: formData.escolaridade || null,
         valor_sessao: formData.valor_sessao ? parseFloat(formData.valor_sessao) : 0,
@@ -176,9 +224,89 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
           />
         </div>
 
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            CEP
+          </label>
+          <div className="relative">
+            <input
+              type="text"
+              name="cep"
+              value={formData.cep}
+              onChange={handleCEPChange}
+              onBlur={handleCEPBlur}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="00000-000"
+              maxLength={9}
+            />
+            {buscandoCEP && (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                <Loader2 className="w-5 h-5 text-primary animate-spin" />
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="md:col-span-2">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Endereço
+            Rua
+          </label>
+          <input
+            type="text"
+            name="rua"
+            value={formData.rua}
+            onChange={handleInputChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            placeholder="Nome da rua/avenida"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Bairro
+          </label>
+          <input
+            type="text"
+            name="bairro"
+            value={formData.bairro}
+            onChange={handleInputChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            placeholder="Bairro"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Cidade
+          </label>
+          <input
+            type="text"
+            name="cidade"
+            value={formData.cidade}
+            onChange={handleInputChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            placeholder="Cidade"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Estado (UF)
+          </label>
+          <input
+            type="text"
+            name="estado"
+            value={formData.estado}
+            onChange={handleInputChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            placeholder="SP"
+            maxLength={2}
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Endereço Completo (opcional)
           </label>
           <input
             type="text"
@@ -186,7 +314,7 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
             value={formData.endereco}
             onChange={handleInputChange}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
-            placeholder="Rua, número, bairro, cidade - UF"
+            placeholder="Endereço completo alternativo"
           />
         </div>
 
@@ -207,14 +335,23 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Escolaridade
           </label>
-          <input
-            type="text"
+          <select
             name="escolaridade"
             value={formData.escolaridade}
             onChange={handleInputChange}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
-            placeholder="Ex: Superior Completo"
-          />
+          >
+            <option value="">Selecione</option>
+            <option value="Fundamental Incompleto">Fundamental Incompleto</option>
+            <option value="Fundamental Completo">Fundamental Completo</option>
+            <option value="Médio Incompleto">Médio Incompleto</option>
+            <option value="Médio Completo">Médio Completo</option>
+            <option value="Superior Incompleto">Superior Incompleto</option>
+            <option value="Superior Completo">Superior Completo</option>
+            <option value="Pós-graduação">Pós-graduação</option>
+            <option value="Mestrado">Mestrado</option>
+            <option value="Doutorado">Doutorado</option>
+          </select>
         </div>
 
         <div className="md:col-span-2">

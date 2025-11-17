@@ -735,3 +735,4 @@ export async function getQRCode(instanceName: string): Promise<string | null> {
 - [ ] Métricas e monitoramento de instâncias
 
 
+

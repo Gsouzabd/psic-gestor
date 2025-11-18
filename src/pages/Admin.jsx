@@ -156,16 +156,20 @@ export default function Admin() {
     setSaving(true)
 
     try {
-      // Atualizar perfil
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({
+      // Atualizar via Edge Function para garantir permissões adequadas
+      const { data: functionData, error: functionError } = await supabase.functions.invoke('update-psychologist', {
+        body: {
+          user_id: editingPsicologo.id,
           nome_completo: formData.nome_completo,
           role: formData.role
-        })
-        .eq('id', editingPsicologo.id)
+        }
+      })
 
-      if (updateError) throw updateError
+      if (functionError) throw functionError
+
+      if (functionData?.error) {
+        throw new Error(functionData.error)
+      }
 
       const tipoUsuario = formData.role === 'esteticista' ? 'Esteticista' : 'Psicólogo'
       success(`${tipoUsuario} "${formData.nome_completo}" atualizado com sucesso!`)

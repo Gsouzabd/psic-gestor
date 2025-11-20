@@ -8,6 +8,7 @@ import ThemeProvider from './components/ThemeProvider'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
+import DashboardFinanceiro from './pages/DashboardFinanceiro'
 import Pacientes from './pages/Pacientes'
 import PacienteDetalhes from './pages/PacienteDetalhes'
 import Admin from './pages/Admin'
@@ -146,6 +147,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard-financeiro"
+              element={
+                <ProtectedRoute>
+                  <DashboardFinanceiro />
                 </ProtectedRoute>
               }
             />

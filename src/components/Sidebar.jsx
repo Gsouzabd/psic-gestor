@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LayoutDashboard, Users, LogOut, User, Menu, X, Shield, Settings, ClipboardCheck } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, User, Menu, X, Shield, Settings, ClipboardCheck, DollarSign } from 'lucide-react'
 import NotificationBadge from './NotificationBadge'
 
 export default function Sidebar() {
@@ -21,6 +21,7 @@ export default function Sidebar() {
 
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/dashboard-financeiro', icon: DollarSign, label: 'Financeiro' },
     { path: '/pacientes', icon: Users, label: 'Pacientes' },
     { path: '/confirmacoes', icon: ClipboardCheck, label: 'Confirmações' },
     { path: '/configuracoes', icon: Settings, label: 'Configurações' },

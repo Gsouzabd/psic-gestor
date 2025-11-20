@@ -156,20 +156,20 @@ export default function SessionCard({ sessao, onDelete, onEdit }) {
       {/* Modal de visualização ampliada da imagem */}
       {selectedImage && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4 overflow-y-auto"
           onClick={() => setSelectedImage(null)}
         >
-          <div className="relative max-w-4xl max-h-[90vh] w-full">
+          <div className="relative max-w-4xl w-full my-auto">
             <button
               onClick={() => setSelectedImage(null)}
-              className="absolute top-4 right-4 p-2 bg-white rounded-full hover:bg-gray-100 transition z-10"
+              className="absolute top-4 right-4 p-2 bg-white rounded-full hover:bg-gray-100 transition z-10 shadow-lg"
             >
               <XCircle className="w-6 h-6 text-gray-700" />
             </button>
             <img
               src={selectedImage}
               alt="Imagem ampliada"
-              className="w-full h-full object-contain rounded-lg"
+              className="w-full h-auto object-contain rounded-lg shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             />
           </div>

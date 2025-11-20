@@ -5,7 +5,7 @@ import Calendar from '../components/Calendar'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle, MessageSquare, Video, MapPin, ExternalLink } from 'lucide-react'
+import { Users, Calendar as CalendarIcon, DollarSign, Clock, Plus, CheckCircle, XCircle, AlertCircle, MessageSquare, Video, MapPin, ExternalLink, Filter } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import RecurrenceOptions from '../components/RecurrenceOptions'
@@ -27,9 +27,11 @@ const parseLocalDate = (dateString) => {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const { success, error: showError } = useToast()
   const [loading, setLoading] = useState(true)
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false)
+  const [consultasHoje, setConsultasHoje] = useState([])
   const [stats, setStats] = useState({
     totalPacientes: 0,
     sessoesSemana: 0,
@@ -67,6 +69,12 @@ export default function Dashboard() {
   })
   const [savingAgendamento, setSavingAgendamento] = useState(false)
   const [agendamentoError, setAgendamentoError] = useState('')
+  
+  // Filtros
+  const [filtroPeriodo, setFiltroPeriodo] = useState('semana')
+  const [dataInicio, setDataInicio] = useState('')
+  const [dataFim, setDataFim] = useState('')
+  const [filtroPaciente, setFiltroPaciente] = useState('todos')
 
   const fetchPacientes = async () => {
     if (!user) return
@@ -85,62 +93,105 @@ export default function Dashboard() {
     }
   }
 
+  // Função para calcular período baseado no filtro
+  const calcularPeriodo = () => {
+    const hoje = new Date()
+    let inicio, fim
+    
+    switch (filtroPeriodo) {
+      case 'semana':
+        const diaSemana = hoje.getDay()
+        const diaMes = hoje.getDate()
+        inicio = new Date(hoje)
+        inicio.setDate(diaMes - diaSemana)
+        fim = new Date(hoje)
+        fim.setDate(diaMes - diaSemana + 6)
+        break
+      case 'mes':
+        inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
+        fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)
+        break
+      case 'personalizado':
+        inicio = dataInicio ? new Date(dataInicio) : new Date()
+        fim = dataFim ? new Date(dataFim) : new Date()
+        break
+      default:
+        inicio = new Date()
+        fim = new Date()
+    }
+    
+    return {
+      inicio: inicio.toISOString().split('T')[0],
+      fim: fim.toISOString().split('T')[0]
+    }
+  }
+
   const fetchDashboardData = useCallback(async () => {
     if (!user) return
     
     try {
+      const periodo = calcularPeriodo()
+      
       // Total de pacientes
       const { count: totalPacientes } = await supabase
         .from('pacientes')
         .select('*', { count: 'exact', head: true })
         .eq('psicologo_id', user.id)
 
-      // Sessões da semana atual
-      const hoje = new Date()
-      const diaSemana = hoje.getDay()
-      const diaMes = hoje.getDate()
-      const inicioSemana = new Date(hoje)
-      inicioSemana.setDate(diaMes - diaSemana)
-      const fimSemana = new Date(hoje)
-      fimSemana.setDate(diaMes - diaSemana + 6)
-      const inicioSemanaStr = inicioSemana.toISOString().split('T')[0]
-      const fimSemanaStr = fimSemana.toISOString().split('T')[0]
-      
-      // Contar prontuários da semana (sessões já realizadas)
-      const { count: prontuariosSemana } = await supabase
+      // Sessões do período (usando filtro)
+      let queryProntuarios = supabase
         .from('prontuarios')
         .select('*, pacientes!inner(psicologo_id)', { count: 'exact', head: true })
         .eq('pacientes.psicologo_id', user.id)
-        .gte('data', inicioSemanaStr)
-        .lte('data', fimSemanaStr)
+        .gte('data', periodo.inicio)
+        .lte('data', periodo.fim)
       
-      // Contar sessões agendadas da semana (status agendado - compareceu = null)
-      const { count: sessoesAgendadasSemana } = await supabase
+      let querySessoesAgendadas = supabase
         .from('sessoes_agendadas')
         .select('*, pacientes!inner(psicologo_id)', { count: 'exact', head: true })
         .eq('pacientes.psicologo_id', user.id)
         .is('compareceu', null)
-        .gte('data', inicioSemanaStr)
-        .lte('data', fimSemanaStr)
+        .gte('data', periodo.inicio)
+        .lte('data', periodo.fim)
       
-      // Total de sessões da semana = prontuários + sessões agendadas
+      // Aplicar filtro de paciente se não for "todos"
+      if (filtroPaciente !== 'todos') {
+        queryProntuarios = queryProntuarios.eq('paciente_id', filtroPaciente)
+        querySessoesAgendadas = querySessoesAgendadas.eq('paciente_id', filtroPaciente)
+      }
+      
+      const { count: prontuariosSemana } = await queryProntuarios
+      const { count: sessoesAgendadasSemana } = await querySessoesAgendadas
+      
+      // Total de sessões do período = prontuários + sessões agendadas
       const sessoesSemana = (prontuariosSemana || 0) + (sessoesAgendadasSemana || 0)
 
-      // Pagamentos pendentes
-      const { data: pagamentosPendentesData } = await supabase
+      // Pagamentos pendentes (sem filtro de período para manter compatibilidade)
+      let queryPagamentosPendentes = supabase
         .from('pagamentos')
         .select('valor_final, pacientes!inner(psicologo_id)')
         .eq('pacientes.psicologo_id', user.id)
         .eq('pago', false)
-
+      
+      if (filtroPaciente !== 'todos') {
+        queryPagamentosPendentes = queryPagamentosPendentes.eq('paciente_id', filtroPaciente)
+      }
+      
+      const { data: pagamentosPendentesData } = await queryPagamentosPendentes
       const pagamentosPendentes = pagamentosPendentesData?.reduce((sum, p) => sum + parseFloat(p.valor_final || 0), 0) || 0
 
-      // Funil de pagamento
+      // Funil de pagamento (sem filtro de período para manter compatibilidade)
       const hojeStr = new Date().toISOString().split('T')[0]
-      const { data: todosPagamentos } = await supabase
+      let queryTodosPagamentos = supabase
         .from('pagamentos')
         .select('valor_final, pago, data, pacientes!inner(psicologo_id)')
         .eq('pacientes.psicologo_id', user.id)
+      
+      if (filtroPaciente !== 'todos') {
+        queryTodosPagamentos = queryTodosPagamentos.eq('paciente_id', filtroPaciente)
+      }
+      
+      const { data: todosPagamentos } = await queryTodosPagamentos
 
       let pago = 0
       let pendente = 0
@@ -238,7 +289,37 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
+  }, [user, filtroPeriodo, dataInicio, dataFim, filtroPaciente])
+
+  // Função para buscar consultas do dia
+  const fetchConsultasHoje = useCallback(async () => {
+    if (!user) return
+    
+    try {
+      const hojeStr = new Date().toISOString().split('T')[0]
+      
+      // Buscar sessões agendadas de hoje
+      const { data: sessoesAgendadasHoje, error } = await supabase
+        .from('sessoes_agendadas')
+        .select('*, pacientes!inner(id, nome_completo, psicologo_id), confirmada_pelo_paciente, confirmada_em, tipo_consulta, link_meet')
+        .eq('pacientes.psicologo_id', user.id)
+        .eq('data', hojeStr)
+        .is('compareceu', null)
+        .order('hora', { ascending: true })
+      
+      if (error) throw error
+      
+      const consultas = (sessoesAgendadasHoje || []).map(s => ({
+        ...s,
+        paciente_nome: s.pacientes.nome_completo
+      }))
+      
+      setConsultasHoje(consultas)
+    } catch (error) {
+      console.error('Erro ao buscar consultas do dia:', error)
+    }
   }, [user])
+
 
   useEffect(() => {
     aplicarFiltroSessoes(sessoesAgendadas, filtroStatus)
@@ -277,6 +358,35 @@ export default function Dashboard() {
       fetchPacientes()
     }
   }, [user, fetchDashboardData])
+
+  // Verificar se é o primeiro login e mostrar diálogo de boas-vindas
+  // Executar após o carregamento dos dados
+  useEffect(() => {
+    if (!user) return
+    
+    const welcomeShown = localStorage.getItem(`welcome_shown_${user.id}`)
+    
+    if (!welcomeShown) {
+      // Aguardar o loading terminar
+      const checkAndShow = async () => {
+        if (loading) {
+          // Se ainda estiver carregando, tentar novamente após um tempo
+          setTimeout(checkAndShow, 300)
+          return
+        }
+        
+        // Carregar consultas e mostrar modal
+        await fetchConsultasHoje()
+        setShowWelcomeModal(true)
+        localStorage.setItem(`welcome_shown_${user.id}`, 'true')
+      }
+      
+      // Iniciar verificação após um pequeno delay para garantir que o componente está montado
+      const timer = setTimeout(checkAndShow, 500)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [user, loading, fetchConsultasHoje])
 
   // Escutar mudanças em tempo real nas sessões agendadas
   useEffect(() => {
@@ -528,16 +638,94 @@ export default function Dashboard() {
             <p className="text-sm sm:text-base text-gray-600 mt-1">Visão geral dos seus atendimentos</p>
           </div>
           <button
-            onClick={() => navigate('/pacientes?novo=true')}
+            onClick={() => {
+              const hoje = new Date()
+              const dateString = format(hoje, 'yyyy-MM-dd')
+              const defaultEndDate = new Date(hoje)
+              defaultEndDate.setMonth(defaultEndDate.getMonth() + 3)
+              const defaultEndDateString = format(defaultEndDate, 'yyyy-MM-dd')
+              
+              setAgendamentoForm({
+                paciente_id: '',
+                hora: '',
+                data: dateString,
+                isRecurring: false,
+                tipoRecorrencia: 'semanal',
+                dataFim: defaultEndDateString,
+                criarPrevisao: false,
+                tipo_consulta: 'presencial',
+                link_meet: ''
+              })
+              setShowAgendamentoModal(true)
+              setAgendamentoError('')
+            }}
             className="flex items-center justify-center gap-2 bg-primary text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg font-medium hover:bg-opacity-90 transition shadow-sm hover:shadow-md text-sm sm:text-base w-full sm:w-auto"
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-            Novo Paciente
+            Nova Consulta
           </button>
         </div>
 
+        {/* Filtros */}
+        {/* <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Filter className="w-4 h-4 inline mr-2" />
+                Período
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={filtroPeriodo}
+                  onChange={(e) => setFiltroPeriodo(e.target.value)}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                >
+                  <option value="semana">Semana</option>
+                  <option value="mes">Mês</option>
+                  <option value="personalizado">Período Personalizado</option>
+                </select>
+                {filtroPeriodo === 'personalizado' && (
+                  <>
+                    <input
+                      type="date"
+                      value={dataInicio}
+                      onChange={(e) => setDataInicio(e.target.value)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                      placeholder="Data inicial"
+                    />
+                    <input
+                      type="date"
+                      value={dataFim}
+                      onChange={(e) => setDataFim(e.target.value)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                      placeholder="Data final"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Paciente
+              </label>
+              <select
+                value={filtroPaciente}
+                onChange={(e) => setFiltroPaciente(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              >
+                <option value="todos">Todos os pacientes</option>
+                {pacientes.map((paciente) => (
+                  <option key={paciente.id} value={paciente.id}>
+                    {paciente.nome_completo}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div> */}
+
         {/* Cards de Estatísticas */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div className="min-w-0 flex-1">
@@ -553,11 +741,11 @@ export default function Dashboard() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div className="min-w-0 flex-1">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Sessões da Semana</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Consultas da Semana</p>
                 <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{stats.sessoesSemana}</p>
               </div>
               <div className="p-2 sm:p-3 bg-secondary bg-opacity-10 rounded-lg flex-shrink-0">
-                <CalendarIcon className="w-6 h-6 sm:w-8 sm:h-8 text-secondary" />
+                <CalendarIcon className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
               </div>
             </div>
           </div>
@@ -565,21 +753,7 @@ export default function Dashboard() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div className="min-w-0 flex-1">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Pagamentos Pendentes</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">
-                  R$ {stats.pagamentosPendentes.toFixed(2)}
-                </p>
-              </div>
-              <div className="p-2 sm:p-3 bg-yellow-100 rounded-lg flex-shrink-0">
-                <DollarSign className="w-6 h-6 sm:w-8 sm:h-8 text-yellow-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0 flex-1">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Sessões de Hoje</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Consultas Hoje</p>
                 <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{stats.sessoesHoje}</p>
               </div>
               <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0">
@@ -666,47 +840,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Funil de Pagamento */}
-        <div>
-          <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4">Funil de Pagamento</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-gray-600">Pago</p>
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
-                </div>
-              </div>
-              <p className="text-2xl sm:text-3xl font-bold text-green-600">
-                R$ {funilPagamento.pago.toFixed(2).replace('.', ',')}
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-gray-600">Pendente</p>
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
-                </div>
-              </div>
-              <p className="text-2xl sm:text-3xl font-bold text-yellow-600">
-                R$ {funilPagamento.pendente.toFixed(2).replace('.', ',')}
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-gray-600">Atrasado</p>
-                <div className="p-2 bg-red-100 rounded-lg">
-                  <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600" />
-                </div>
-              </div>
-              <p className="text-2xl sm:text-3xl font-bold text-red-600">
-                R$ {funilPagamento.atrasado.toFixed(2).replace('.', ',')}
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Modal de Detalhes da Sessão */}
@@ -806,8 +939,8 @@ export default function Dashboard() {
                 <p className="text-gray-900 mt-1 whitespace-pre-wrap">{selectedSession.anotacoes}</p>
               </div>
             )}
-            {/* Botão NOTIFICAR PACIENTE - apenas para sessões agendadas (compareceu === null) */}
-            {selectedSession.compareceu === null && selectedSession.id && (
+            {/* Botão NOTIFICAR PACIENTE - apenas para sessões agendadas (compareceu === null) e não confirmadas */}
+            {selectedSession.compareceu === null && selectedSession.id && selectedSession.confirmada_pelo_paciente !== true && (
               <button
                 onClick={async () => {
                   try {
@@ -896,7 +1029,7 @@ export default function Dashboard() {
                   >
                     Ver Detalhes
                   </button>
-                  {sessao.compareceu === null && sessao.id && (
+                  {sessao.compareceu === null && sessao.id && sessao.confirmada_pelo_paciente !== true && (
                     <button
                       onClick={async () => {
                         try {
@@ -1092,6 +1225,137 @@ export default function Dashboard() {
           </div>
         </form>
       </Modal>
+
+      {/* Modal de Boas-Vindas */}
+      <Modal
+        isOpen={showWelcomeModal}
+        onClose={() => setShowWelcomeModal(false)}
+        title="Bem-vindo!"
+        size="lg"
+      >
+        <div className="space-y-6">
+          <div className="text-center">
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              Olá, {profile?.nome_completo || 'Profissional'}! 👋
+            </h3>
+            <p className="text-gray-600">
+              Aqui estão suas consultas de hoje:
+            </p>
+          </div>
+
+          {consultasHoje.length === 0 ? (
+            <div className="text-center py-8">
+              <CalendarIcon className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+              <p className="text-gray-600">Nenhuma consulta agendada para hoje.</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {consultasHoje.map((consulta) => {
+                // Determinar status e cor
+                let statusColor = 'bg-yellow-100 text-yellow-800'
+                let statusText = 'Agendada'
+                let statusIcon = <CalendarIcon className="w-4 h-4" />
+                
+                if (consulta.confirmada_pelo_paciente === true) {
+                  statusColor = 'bg-blue-100 text-blue-800'
+                  statusText = 'Confirmada'
+                  statusIcon = <CheckCircle className="w-4 h-4" />
+                }
+
+                return (
+                  <div
+                    key={consulta.id}
+                    className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900 mb-1">
+                          {consulta.paciente_nome}
+                        </h4>
+                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-4 h-4" />
+                            {consulta.hora?.slice(0, 5)}
+                          </span>
+                          {consulta.tipo_consulta && (
+                            <span className="flex items-center gap-1">
+                              {consulta.tipo_consulta === 'online' ? (
+                                <>
+                                  <Video className="w-4 h-4" />
+                                  <span>Online</span>
+                                </>
+                              ) : (
+                                <>
+                                  <MapPin className="w-4 h-4" />
+                                  <span>Presencial</span>
+                                </>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${statusColor}`}>
+                        {statusIcon}
+                        {statusText}
+                      </span>
+                    </div>
+                    
+                    {consulta.confirmada_pelo_paciente === true && consulta.confirmada_em && (
+                      <p className="text-xs text-gray-500 mb-3">
+                        Confirmada em: {format(new Date(consulta.confirmada_em), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedSession(consulta)
+                          setShowWelcomeModal(false)
+                          setShowSessionModal(true)
+                        }}
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition text-sm"
+                      >
+                        Ver Detalhes
+                      </button>
+                      {consulta.compareceu === null && consulta.id && consulta.confirmada_pelo_paciente !== true && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              setNotifyingSessaoId(consulta.id)
+                              await notifyPatient(consulta.id)
+                              success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                            } catch (error) {
+                              const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                              showError(message)
+                            } finally {
+                              setNotifyingSessaoId(null)
+                            }
+                          }}
+                          disabled={notifyingSessaoId === consulta.id}
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                          {notifyingSessaoId === consulta.id ? 'Enviando...' : 'Notificar'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="pt-4 border-t border-gray-200">
+            <button
+              onClick={() => setShowWelcomeModal(false)}
+              className="w-full bg-primary text-white py-3 rounded-lg font-medium hover:bg-opacity-90 transition"
+            >
+              Entendi, obrigado!
+            </button>
+          </div>
+        </div>
+      </Modal>
+
     </Layout>
   )
 }

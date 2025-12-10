@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2, MessageSquare, Video, MapPin, ExternalLink } from 'lucide-react'
+import { Calendar, Clock, DollarSign, CheckCircle, XCircle, Trash2, MessageSquare, Video, MapPin, ExternalLink, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { marcarComparecimento } from '../utils/sessoesAgendadas'
@@ -8,6 +8,7 @@ import { deleteFutureRecurringAppointments } from '../utils/recurrence'
 import RecurrenceActionModal from './RecurrenceActionModal'
 import { notifyPatient } from '../services/notificationService'
 import { useToast } from '../contexts/ToastContext'
+import Modal from './Modal'
 
 // Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
 const parseLocalDate = (dateString) => {
@@ -25,6 +26,18 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
   const [showRecurrenceModal, setShowRecurrenceModal] = useState(false)
   const [pendingSessao, setPendingSessao] = useState(null)
   const [notifyingSessaoId, setNotifyingSessaoId] = useState(null)
+  
+  // Modal de Criar Pagamento
+  const [showCriarPagamentoModal, setShowCriarPagamentoModal] = useState(false)
+  const [sessaoParaPagamento, setSessaoParaPagamento] = useState(null)
+  const [pagamentoForm, setPagamentoForm] = useState({
+    data_vencimento: '',
+    data_pagamento: '',
+    valor_sessao: '',
+    desconto: '0'
+  })
+  const [savingPagamento, setSavingPagamento] = useState(false)
+  const [pagamentoError, setPagamentoError] = useState('')
 
   useEffect(() => {
     fetchSessoesAgendadas()
@@ -38,13 +51,17 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
     let filtradas = sessoes
     switch (filtro) {
       case 'agendadas':
-        filtradas = sessoes.filter(s => s.compareceu === null)
+        filtradas = sessoes.filter(s => s.compareceu === null && !(s.confirmada_pelo_paciente === false && s.confirmada_em !== null))
         break
       case 'confirmadas':
         filtradas = sessoes.filter(s => s.compareceu === true)
         break
       case 'canceladas':
-        filtradas = sessoes.filter(s => s.compareceu === false)
+        // Canceladas = compareceu === false OU (confirmada_pelo_paciente === false E confirmada_em não null)
+        filtradas = sessoes.filter(s => 
+          s.compareceu === false || 
+          (s.confirmada_pelo_paciente === false && s.confirmada_em !== null)
+        )
         break
       default:
         filtradas = sessoes
@@ -55,9 +72,12 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
   const contarPorStatus = () => {
     return {
       todas: sessoesAgendadas.length,
-      agendadas: sessoesAgendadas.filter(s => s.compareceu === null).length,
+      agendadas: sessoesAgendadas.filter(s => s.compareceu === null && !(s.confirmada_pelo_paciente === false && s.confirmada_em !== null)).length,
       confirmadas: sessoesAgendadas.filter(s => s.compareceu === true).length,
-      canceladas: sessoesAgendadas.filter(s => s.compareceu === false).length
+      canceladas: sessoesAgendadas.filter(s => 
+        s.compareceu === false || 
+        (s.confirmada_pelo_paciente === false && s.confirmada_em !== null)
+      ).length
     }
   }
 
@@ -66,7 +86,7 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
       // Buscar sessões agendadas (compareceu pode ser null, true ou false)
       const { data: sessoes, error } = await supabase
         .from('sessoes_agendadas')
-        .select('*, recorrencia_id')
+        .select('*, recorrencia_id, confirmada_pelo_paciente, confirmada_em')
         .eq('paciente_id', pacienteId)
         .order('data', { ascending: true })
         .order('hora', { ascending: true })
@@ -128,36 +148,80 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
     }
   }
 
-  const handleCriarPagamento = async (sessao) => {
-    if (!confirm(`Deseja criar um pagamento para a sessão de ${format(parseLocalDate(sessao.data), "dd/MM/yyyy", { locale: ptBR })}?`)) {
-      return
-    }
+  const handleCriarPagamento = (sessao) => {
+    setSessaoParaPagamento(sessao)
+    setPagamentoForm({
+      data_vencimento: sessao.data, // Por padrão, vence na data da consulta
+      data_pagamento: format(new Date(), 'yyyy-MM-dd'),
+      valor_sessao: (paciente.valor_sessao || 0).toString(),
+      desconto: '0'
+    })
+    setPagamentoError('')
+    setShowCriarPagamentoModal(true)
+  }
+
+  const handleSalvarPagamento = async (e) => {
+    e.preventDefault()
+    setPagamentoError('')
+    setSavingPagamento(true)
 
     try {
-      const valorSessao = paciente.valor_sessao || 0
+      if (!pagamentoForm.valor_sessao) {
+        setPagamentoError('Por favor, informe o valor da sessão.')
+        setSavingPagamento(false)
+        return
+      }
+
+      const valorSessao = parseFloat(pagamentoForm.valor_sessao) || 0
+      const desconto = parseFloat(pagamentoForm.desconto) || 0
+      const valorFinal = valorSessao - desconto
+
+      if (valorFinal < 0) {
+        setPagamentoError('O valor final não pode ser negativo.')
+        setSavingPagamento(false)
+        return
+      }
+
+      const temDataPagamento = pagamentoForm.data_pagamento && pagamentoForm.data_pagamento.trim() !== ''
+      const dataVencimento = pagamentoForm.data_vencimento && pagamentoForm.data_vencimento.trim() !== '' 
+        ? pagamentoForm.data_vencimento 
+        : sessaoParaPagamento.data
+      const dataPagamento = temDataPagamento ? pagamentoForm.data_pagamento : null
 
       const { error } = await supabase
         .from('pagamentos')
         .insert([
           {
-            sessao_agendada_id: sessao.id,
+            sessao_agendada_id: sessaoParaPagamento.id,
             paciente_id: pacienteId,
-            data: sessao.data,
+            data: sessaoParaPagamento.data,
+            data_vencimento: dataVencimento,
+            data_pagamento: dataPagamento,
             valor_sessao: valorSessao,
-            desconto: 0,
+            desconto: desconto,
             compareceu: null, // Ainda não foi marcado
-            pago: false,
+            pago: Boolean(temDataPagamento), // Se tem data de pagamento, considera como pago (sempre boolean)
             previsao: false // Pagamento real, não previsto
           }
         ])
 
       if (error) throw error
 
-      alert('Pagamento criado com sucesso!')
+      success('Pagamento criado com sucesso!')
+      setShowCriarPagamentoModal(false)
+      setSessaoParaPagamento(null)
+      setPagamentoForm({
+        data_vencimento: '',
+        data_pagamento: '',
+        valor_sessao: '',
+        desconto: '0'
+      })
       fetchSessoesAgendadas()
     } catch (error) {
       console.error('Erro ao criar pagamento:', error)
-      alert('Erro ao criar pagamento. Tente novamente.')
+      setPagamentoError('Erro ao criar pagamento. Tente novamente.')
+    } finally {
+      setSavingPagamento(false)
     }
   }
 
@@ -406,6 +470,18 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                       <XCircle className="w-3 h-3" />
                       Não Compareceu
                     </span>
+                  ) : sessao.confirmada_pelo_paciente === false && sessao.confirmada_em !== null ? (
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium flex items-center gap-1">
+                        <XCircle className="w-3 h-3" />
+                        Cancelada pelo paciente
+                      </span>
+                      {sessao.confirmada_em && (
+                        <span className="text-xs text-gray-500">
+                          {format(new Date(sessao.confirmada_em), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        </span>
+                      )}
+                    </div>
                   ) : sessao.confirmada_pelo_paciente === true ? (
                     <div className="flex flex-col items-end gap-1">
                       <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium flex items-center gap-1">
@@ -513,6 +589,132 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
         onConfirm={handleDeleteRecurrence}
         action="delete"
       />
+
+      {/* Modal de Criar Pagamento */}
+      <Modal
+        isOpen={showCriarPagamentoModal}
+        onClose={() => {
+          setShowCriarPagamentoModal(false)
+          setSessaoParaPagamento(null)
+          setPagamentoForm({
+            data_vencimento: '',
+            data_pagamento: '',
+            valor_sessao: '',
+            desconto: '0'
+          })
+          setPagamentoError('')
+        }}
+        title={`Criar Pagamento - ${sessaoParaPagamento ? format(parseLocalDate(sessaoParaPagamento.data), "dd/MM/yyyy", { locale: ptBR }) : ''}`}
+        size="md"
+      >
+        {pagamentoError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <span className="text-sm text-red-800">{pagamentoError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSalvarPagamento} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Valor da Sessão (R$) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.valor_sessao}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, valor_sessao: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Desconto (R$)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.desconto}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, desconto: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data de Vencimento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_vencimento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_vencimento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Se não informado, usa a data da consulta como vencimento.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data do Pagamento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_pagamento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_pagamento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Se preenchido, o pagamento será marcado como pago.
+            </p>
+          </div>
+
+          {pagamentoForm.valor_sessao && (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Valor Final:</span>
+                <span className="text-lg font-bold text-gray-900">
+                  R$ {((parseFloat(pagamentoForm.valor_sessao) || 0) - (parseFloat(pagamentoForm.desconto) || 0)).toFixed(2).replace('.', ',')}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCriarPagamentoModal(false)
+                setSessaoParaPagamento(null)
+                setPagamentoForm({
+                  data_vencimento: '',
+                  data_pagamento: '',
+                  valor_sessao: '',
+                  desconto: '0'
+                })
+                setPagamentoError('')
+              }}
+              className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={savingPagamento}
+              className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
+            >
+              {savingPagamento ? 'Salvando...' : 'Criar Pagamento'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

@@ -931,6 +931,19 @@ export default function Dashboard() {
                     )}
                   </div>
                 )}
+                {selectedSession.confirmada_pelo_paciente === false && selectedSession.confirmada_em !== null && (
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <span className="flex items-center gap-2 text-red-600">
+                      <XCircle className="w-5 h-5" />
+                      Cancelada pelo paciente
+                    </span>
+                    {selectedSession.confirmada_em && (
+                      <p className="text-xs text-gray-500 mt-1 ml-7">
+                        Cancelada em: {format(new Date(selectedSession.confirmada_em), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             {selectedSession.anotacoes && (

@@ -89,6 +89,7 @@ export async function marcarComparecimento(sessaoAgendadaId, compareceu, anotaco
         }
       } else {
         // Se não há pagamento previsto, criar pagamento normal
+        const dataPagamento = new Date().toISOString().split('T')[0]
         const { error: pagamentoError } = await supabase
           .from('pagamentos')
           .insert([
@@ -96,6 +97,8 @@ export async function marcarComparecimento(sessaoAgendadaId, compareceu, anotaco
               prontuario_id: novoProntuario.id,
               paciente_id: sessaoAgendada.paciente_id,
               data: sessaoAgendada.data,
+              data_vencimento: sessaoAgendada.data, // Por padrão, vence na data da consulta
+              data_pagamento: dataPagamento,
               valor_sessao: valorSessao,
               desconto: 0,
               compareceu: true,

@@ -26,6 +26,7 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
   const [showRecurrenceModal, setShowRecurrenceModal] = useState(false)
   const [pendingSessao, setPendingSessao] = useState(null)
   const [notifyingSessaoId, setNotifyingSessaoId] = useState(null)
+  const [notificationUseApelidoMap, setNotificationUseApelidoMap] = useState({})
   
   // Modal de Criar Pagamento
   const [showCriarPagamentoModal, setShowCriarPagamentoModal] = useState(false)
@@ -513,25 +514,46 @@ export default function SessoesAgendadasTab({ pacienteId, paciente }) {
                         </button>
                       </div>
                       {/* Botão NOTIFICAR PACIENTE */}
-                      <button
-                        onClick={async () => {
-                          try {
-                            setNotifyingSessaoId(sessao.id)
-                            await notifyPatient(sessao.id)
-                            success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
-                          } catch (error) {
-                            const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
-                            showError(message)
-                          } finally {
-                            setNotifyingSessaoId(null)
-                          }
-                        }}
-                        disabled={notifyingSessaoId === sessao.id}
-                        className="flex items-center justify-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                        {notifyingSessaoId === sessao.id ? 'Enviando...' : 'NOTIFICAR PACIENTE'}
-                      </button>
+                      <div className="flex gap-2">
+                        {paciente?.apelido && paciente.apelido.trim() !== '' && (
+                          <select
+                            value={notificationUseApelidoMap[sessao.id] ? 'apelido' : 'nome'}
+                            onChange={(e) => setNotificationUseApelidoMap(prev => ({
+                              ...prev,
+                              [sessao.id]: e.target.value === 'apelido'
+                            }))}
+                            className="px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition text-sm"
+                            disabled={notifyingSessaoId === sessao.id}
+                          >
+                            <option value="nome">Nome</option>
+                            <option value="apelido">Apelido</option>
+                          </select>
+                        )}
+                        <button
+                          onClick={async () => {
+                            try {
+                              setNotifyingSessaoId(sessao.id)
+                              await notifyPatient(sessao.id, notificationUseApelidoMap[sessao.id] || false)
+                              success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                              setNotificationUseApelidoMap(prev => {
+                                const newMap = { ...prev }
+                                delete newMap[sessao.id]
+                                return newMap
+                              })
+                            } catch (error) {
+                              const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                              showError(message)
+                            } finally {
+                              setNotifyingSessaoId(null)
+                            }
+                          }}
+                          disabled={notifyingSessaoId === sessao.id}
+                          className="flex items-center justify-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                          {notifyingSessaoId === sessao.id ? 'Enviando...' : 'NOTIFICAR PACIENTE'}
+                        </button>
+                      </div>
                     </div>
                   )}
 

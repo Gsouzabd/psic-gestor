@@ -652,7 +652,7 @@ export default function Admin() {
                 type="url"
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
-                placeholder="https://gsouzabd.app.n8n.cloud/webhook/notify-paciente-psic-gestor"
+                placeholder="https://n8n-venturize-n8n.8tlzgn.easypanel.host/webhook/notify-paciente-psic-gestor"
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
                 disabled={savingWebhook}
               />

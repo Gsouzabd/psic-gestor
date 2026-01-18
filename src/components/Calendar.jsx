@@ -100,6 +100,9 @@ export default function Calendar({ sessions = [], onEventClick, onDayClick, onMu
                 bgColor = 'bg-primary text-white'
               } else if (session.compareceu === false) {
                 bgColor = 'bg-red-500 text-white'
+              } else if (session.confirmada_pelo_paciente === false && session.confirmada_em !== null) {
+                // Cancelada pelo paciente
+                bgColor = 'bg-red-500 text-white'
               } else if (session.confirmada_pelo_paciente === true) {
                 // Confirmada pelo paciente (mas ainda agendada)
                 bgColor = 'bg-blue-500 text-white'

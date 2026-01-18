@@ -25,6 +25,7 @@ export default function Pacientes() {
   // Formulário novo paciente
   const [formData, setFormData] = useState({
     nome_completo: '',
+    apelido: '',
     idade: '',
     data_nascimento: '',
     genero: '',
@@ -123,6 +124,7 @@ export default function Pacientes() {
   const resetForm = () => {
     setFormData({
       nome_completo: '',
+      apelido: '',
       idade: '',
       data_nascimento: '',
       genero: '',
@@ -370,6 +372,20 @@ export default function Pacientes() {
                 onChange={handleInputChange}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
                 required
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Apelido
+              </label>
+              <input
+                type="text"
+                name="apelido"
+                value={formData.apelido}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                placeholder="Apelido opcional para notificações"
               />
             </div>
 

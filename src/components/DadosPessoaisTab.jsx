@@ -10,6 +10,7 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
   const { success, error: showError } = useToast()
   const [formData, setFormData] = useState({
     nome_completo: '',
+    apelido: '',
     idade: '',
     data_nascimento: '',
     genero: '',
@@ -31,6 +32,7 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
     if (paciente) {
       setFormData({
         nome_completo: paciente.nome_completo || '',
+        apelido: paciente.apelido || '',
         idade: paciente.idade || '',
         data_nascimento: paciente.data_nascimento || '',
         genero: paciente.genero || '',
@@ -95,6 +97,7 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
     try {
       const updateData = {
         nome_completo: formData.nome_completo,
+        apelido: formData.apelido || null,
         idade: formData.idade ? parseInt(formData.idade) : null,
         data_nascimento: formData.data_nascimento || null,
         genero: formData.genero || null,
@@ -148,6 +151,20 @@ export default function DadosPessoaisTab({ pacienteId, paciente, onUpdate }) {
             onChange={handleInputChange}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
             required
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Apelido
+          </label>
+          <input
+            type="text"
+            name="apelido"
+            value={formData.apelido}
+            onChange={handleInputChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            placeholder="Apelido opcional para notificações"
           />
         </div>
 

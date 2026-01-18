@@ -13,14 +13,14 @@ async function getWebhookUrl(): Promise<string> {
     if (error) {
       console.error('Erro ao buscar webhook via RPC:', error)
       // Fallback para URL padrão
-      return 'https://gsouzabd.app.n8n.cloud/webhook/notify-paciente-psic-gestor'
+      return 'https://n8n-venturize-n8n.8tlzgn.easypanel.host/webhook/notify-paciente-psic-gestor'
     }
 
-    return data || 'https://gsouzabd.app.n8n.cloud/webhook/notify-paciente-psic-gestor'
+    return data || 'https://n8n-venturize-n8n.8tlzgn.easypanel.host/webhook/notify-paciente-psic-gestor'
   } catch (error) {
     console.error('Erro ao obter webhook URL:', error)
     // Fallback para URL padrão
-    return 'https://gsouzabd.app.n8n.cloud/webhook/notify-paciente-psic-gestor'
+    return 'https://n8n-venturize-n8n.8tlzgn.easypanel.host/webhook/notify-paciente-psic-gestor'
   }
 }
 
@@ -62,6 +62,7 @@ async function getOrCreateNotificationToken(sessaoId: string): Promise<string> {
 // Obter URL base da aplicação
 function getBaseUrl(): string {
   // Em desenvolvimento, usar localhost
+  // @ts-ignore - import.meta.env é válido em Vite
   if (import.meta.env.DEV) {
     return 'http://localhost:5173'
   }
@@ -70,7 +71,7 @@ function getBaseUrl(): string {
 }
 
 // Notificar paciente sobre sessão agendada
-export async function notifyPatient(sessaoId: string): Promise<void> {
+export async function notifyPatient(sessaoId: string, useApelido?: boolean): Promise<void> {
   try {
     // 1. Buscar dados da sessão e paciente
     const { data: sessao, error: sessaoError } = await supabase
@@ -85,6 +86,7 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
         pacientes!inner (
           id,
           nome_completo,
+          apelido,
           telefone,
           psicologo_id
         )
@@ -96,7 +98,8 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
       throw new Error('Sessão não encontrada')
     }
 
-    const paciente = sessao.pacientes
+    // O Supabase retorna pacientes como objeto único quando usado com !inner e .single()
+    const paciente = sessao.pacientes as any
     if (!paciente) {
       throw new Error('Paciente não encontrado')
     }
@@ -135,10 +138,16 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
     const baseUrl = getBaseUrl()
     const urlConfirm = `${baseUrl}/confirmar-sessao/${sessaoId}?token=${token}`
 
-    // 6. Preparar payload
+    // 6. Determinar qual nome usar (apelido ou nome_completo)
+    let pacienteNome = paciente.nome_completo
+    if (useApelido && paciente.apelido && paciente.apelido.trim() !== '') {
+      pacienteNome = paciente.apelido
+    }
+
+    // 7. Preparar payload
     const payload: any = {
       psicologo_id: psicologoId,
-      paciente_nome: paciente.nome_completo,
+      paciente_nome: pacienteNome,
       paciente_telefone: paciente.telefone || '',
       sessao_id: sessaoId,
       sessao_data: sessao.data,
@@ -153,10 +162,10 @@ export async function notifyPatient(sessaoId: string): Promise<void> {
       payload.link_meet = sessao.link_meet
     }
 
-    // 7. Obter URL do webhook global
+    // 8. Obter URL do webhook global
     const webhookUrl = await getWebhookUrl()
     
-    // 8. Enviar POST para webhook n8n com Basic Auth
+    // 9. Enviar POST para webhook n8n com Basic Auth
     const credentials = btoa(`${WEBHOOK_USERNAME}:${WEBHOOK_PASSWORD}`)
     
     const response = await fetch(webhookUrl, {

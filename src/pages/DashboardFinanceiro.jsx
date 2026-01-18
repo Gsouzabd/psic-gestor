@@ -4,7 +4,7 @@ import Modal from '../components/Modal'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { DollarSign, CheckCircle, Clock, AlertCircle, Plus, Filter, XCircle } from 'lucide-react'
+import { DollarSign, CheckCircle, Clock, AlertCircle, Plus, Filter, XCircle, Edit, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -27,6 +27,7 @@ export default function DashboardFinanceiro() {
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim] = useState('')
   const [filtroPaciente, setFiltroPaciente] = useState('todos')
+  const [filtroTipoData, setFiltroTipoData] = useState('consulta') // 'consulta', 'vencimento' ou 'pagamento'
   
   // Dashboard Financeiro
   const [dashboardFinanceiro, setDashboardFinanceiro] = useState({
@@ -42,10 +43,17 @@ export default function DashboardFinanceiro() {
   const [pagamentoForm, setPagamentoForm] = useState({
     paciente_id: '',
     data: '',
+    data_vencimento: '',
+    data_pagamento: '',
     valor_sessao: '',
     desconto: '0',
     pago: false
   })
+
+  // Modal Editar Pagamento
+  const [showEditarPagamentoModal, setShowEditarPagamentoModal] = useState(false)
+  const [pagamentoEditando, setPagamentoEditando] = useState(null)
+  const [deletingPagamento, setDeletingPagamento] = useState(false)
 
   // Função para calcular período baseado no filtro
   const calcularPeriodo = () => {
@@ -103,14 +111,30 @@ export default function DashboardFinanceiro() {
     
     try {
       const periodo = calcularPeriodo()
-      const hojeStr = new Date().toISOString().split('T')[0]
+      const hoje = new Date()
+      const hojeStr = hoje.toISOString().split('T')[0]
+      
+      // Calcular ontem (D-1) para determinar o que está atrasado
+      const ontem = new Date(hoje)
+      ontem.setDate(ontem.getDate() - 1)
+      const ontemStr = ontem.toISOString().split('T')[0]
       
       let query = supabase
         .from('pagamentos')
         .select('*, pacientes!inner(id, nome_completo, psicologo_id)')
         .eq('pacientes.psicologo_id', user.id)
-        .gte('data', periodo.inicio)
-        .lte('data', periodo.fim)
+      
+      // Aplicar filtro de período baseado no tipo de data selecionado
+      let campoData = 'data'
+      if (filtroTipoData === 'pagamento') {
+        campoData = 'data_pagamento'
+      } else if (filtroTipoData === 'vencimento') {
+        campoData = 'data_vencimento'
+      }
+      
+      query = query
+        .gte(campoData, periodo.inicio)
+        .lte(campoData, periodo.fim)
         .order('data', { ascending: false })
       
       // Aplicar filtro de paciente se não for "todos"
@@ -134,8 +158,9 @@ export default function DashboardFinanceiro() {
           if (pagamento.pago === true) {
             pago += valor
           } else {
-            const dataPagamento = pagamento.data
-            if (dataPagamento && dataPagamento < hojeStr) {
+            // Considera atrasado se a data de vencimento (ou data da consulta se não houver vencimento) é menor ou igual a ontem (D+1)
+            const dataVencimento = pagamento.data_vencimento || pagamento.data
+            if (dataVencimento && dataVencimento <= ontemStr) {
               atrasado += valor
             } else {
               aReceber += valor
@@ -150,7 +175,7 @@ export default function DashboardFinanceiro() {
     } finally {
       setLoading(false)
     }
-  }, [user, filtroPeriodo, dataInicio, dataFim, filtroPaciente])
+  }, [user, filtroPeriodo, dataInicio, dataFim, filtroPaciente, filtroTipoData])
 
   useEffect(() => {
     if (user) {
@@ -161,9 +186,15 @@ export default function DashboardFinanceiro() {
 
   const handleTogglePago = async (pagamentoId, pagoAtual) => {
     try {
+      const novoPago = !pagoAtual
+      const updateData = {
+        pago: novoPago,
+        data_pagamento: novoPago ? format(new Date(), 'yyyy-MM-dd') : null
+      }
+
       const { error } = await supabase
         .from('pagamentos')
-        .update({ pago: !pagoAtual })
+        .update(updateData)
         .eq('id', pagamentoId)
 
       if (error) throw error
@@ -172,6 +203,102 @@ export default function DashboardFinanceiro() {
     } catch (error) {
       console.error('Erro ao atualizar pagamento:', error)
       showError('Erro ao atualizar pagamento')
+    }
+  }
+
+  const handleEditarPagamento = (pagamento) => {
+    setPagamentoEditando(pagamento)
+    setPagamentoForm({
+      paciente_id: pagamento.paciente_id,
+      data: pagamento.data,
+      data_vencimento: pagamento.data_vencimento || '',
+      data_pagamento: pagamento.data_pagamento || '',
+      valor_sessao: pagamento.valor_sessao?.toString() || '',
+      desconto: pagamento.desconto?.toString() || '0',
+      pago: pagamento.pago || false
+    })
+    setPagamentoError('')
+    setShowEditarPagamentoModal(true)
+  }
+
+  const handleExcluirPagamento = async (pagamentoId) => {
+    if (!window.confirm('Tem certeza que deseja excluir este pagamento? Esta ação não pode ser desfeita.')) {
+      return
+    }
+
+    setDeletingPagamento(true)
+    try {
+      const { error } = await supabase
+        .from('pagamentos')
+        .delete()
+        .eq('id', pagamentoId)
+
+      if (error) throw error
+      fetchPagamentosFinanceiro()
+      success('Pagamento excluído com sucesso!')
+    } catch (error) {
+      console.error('Erro ao excluir pagamento:', error)
+      showError('Erro ao excluir pagamento')
+    } finally {
+      setDeletingPagamento(false)
+    }
+  }
+
+  const handleSalvarEdicao = async (e) => {
+    e.preventDefault()
+    setPagamentoError('')
+    setSavingPagamento(true)
+
+    try {
+      if (!pagamentoForm.paciente_id || !pagamentoForm.data || !pagamentoForm.valor_sessao) {
+        setPagamentoError('Por favor, preencha todos os campos obrigatórios.')
+        setSavingPagamento(false)
+        return
+      }
+
+      const valorSessao = parseFloat(pagamentoForm.valor_sessao) || 0
+      const desconto = parseFloat(pagamentoForm.desconto) || 0
+      const valorFinal = valorSessao - desconto
+
+      if (valorFinal < 0) {
+        setPagamentoError('O valor final não pode ser negativo.')
+        setSavingPagamento(false)
+        return
+      }
+
+      const { error } = await supabase
+        .from('pagamentos')
+        .update({
+          paciente_id: pagamentoForm.paciente_id,
+          data: pagamentoForm.data,
+          data_vencimento: pagamentoForm.data_vencimento || null,
+          data_pagamento: pagamentoForm.data_pagamento || null,
+          valor_sessao: valorSessao,
+          desconto: desconto,
+          pago: pagamentoForm.pago
+        })
+        .eq('id', pagamentoEditando.id)
+
+      if (error) throw error
+
+      success('Pagamento atualizado com sucesso!')
+      setShowEditarPagamentoModal(false)
+      setPagamentoEditando(null)
+      setPagamentoForm({
+        paciente_id: '',
+        data: format(new Date(), 'yyyy-MM-dd'),
+        data_vencimento: '',
+        data_pagamento: '',
+        valor_sessao: '',
+        desconto: '0',
+        pago: false
+      })
+      fetchPagamentosFinanceiro()
+    } catch (error) {
+      console.error('Erro ao atualizar pagamento:', error)
+      setPagamentoError('Erro ao atualizar pagamento. Tente novamente.')
+    } finally {
+      setSavingPagamento(false)
     }
   }
 
@@ -198,6 +325,7 @@ export default function DashboardFinanceiro() {
               setPagamentoForm({
                 paciente_id: '',
                 data: format(new Date(), 'yyyy-MM-dd'),
+                data_pagamento: '',
                 valor_sessao: '',
                 desconto: '0',
                 pago: false
@@ -214,57 +342,73 @@ export default function DashboardFinanceiro() {
 
         {/* Filtros */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-          <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Filter className="w-4 h-4 inline mr-2" />
-                Período
-              </label>
-              <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col gap-4 sm:gap-6">
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Filter className="w-4 h-4 inline mr-2" />
+                  Período
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    value={filtroPeriodo}
+                    onChange={(e) => setFiltroPeriodo(e.target.value)}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                  >
+                    <option value="semana">Semana</option>
+                    <option value="mes">Mês</option>
+                    <option value="personalizado">Período Personalizado</option>
+                  </select>
+                  {filtroPeriodo === 'personalizado' && (
+                    <>
+                      <input
+                        type="date"
+                        value={dataInicio}
+                        onChange={(e) => setDataInicio(e.target.value)}
+                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                        placeholder="Data inicial"
+                      />
+                      <input
+                        type="date"
+                        value={dataFim}
+                        onChange={(e) => setDataFim(e.target.value)}
+                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                        placeholder="Data final"
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Paciente
+                </label>
                 <select
-                  value={filtroPeriodo}
-                  onChange={(e) => setFiltroPeriodo(e.target.value)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                  value={filtroPaciente}
+                  onChange={(e) => setFiltroPaciente(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
                 >
-                  <option value="semana">Semana</option>
-                  <option value="mes">Mês</option>
-                  <option value="personalizado">Período Personalizado</option>
+                  <option value="todos">Todos os pacientes</option>
+                  {pacientes.map((paciente) => (
+                    <option key={paciente.id} value={paciente.id}>
+                      {paciente.nome_completo}
+                    </option>
+                  ))}
                 </select>
-                {filtroPeriodo === 'personalizado' && (
-                  <>
-                    <input
-                      type="date"
-                      value={dataInicio}
-                      onChange={(e) => setDataInicio(e.target.value)}
-                      className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
-                      placeholder="Data inicial"
-                    />
-                    <input
-                      type="date"
-                      value={dataFim}
-                      onChange={(e) => setDataFim(e.target.value)}
-                      className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
-                      placeholder="Data final"
-                    />
-                  </>
-                )}
               </div>
             </div>
-            <div className="flex-1">
+            <div className="flex-1 sm:max-w-xs">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Paciente
+                Filtrar por
               </label>
               <select
-                value={filtroPaciente}
-                onChange={(e) => setFiltroPaciente(e.target.value)}
+                value={filtroTipoData}
+                onChange={(e) => setFiltroTipoData(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
               >
-                <option value="todos">Todos os pacientes</option>
-                {pacientes.map((paciente) => (
-                  <option key={paciente.id} value={paciente.id}>
-                    {paciente.nome_completo}
-                  </option>
-                ))}
+                <option value="consulta">Data da Consulta</option>
+                <option value="vencimento">Data de Vencimento</option>
+                <option value="pagamento">Data do Pagamento</option>
               </select>
             </div>
           </div>
@@ -320,10 +464,12 @@ export default function DashboardFinanceiro() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px]">
+                <table className="w-full min-w-[900px]">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data Consulta</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Vencimento</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data Pgto</th>
                       <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Paciente</th>
                       <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Valor</th>
                       <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Desc.</th>
@@ -339,6 +485,26 @@ export default function DashboardFinanceiro() {
                           <span className="text-xs sm:text-sm text-gray-900">
                             {format(parseLocalDate(pagamento.data), "dd/MM/yyyy", { locale: ptBR })}
                           </span>
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                          {pagamento.data_vencimento ? (
+                            <span className="text-xs sm:text-sm text-orange-700 font-medium">
+                              {format(parseLocalDate(pagamento.data_vencimento), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                          ) : (
+                            <span className="text-xs sm:text-sm text-gray-500">
+                              {format(parseLocalDate(pagamento.data), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                          {pagamento.data_pagamento ? (
+                            <span className="text-xs sm:text-sm text-green-700 font-medium">
+                              {format(parseLocalDate(pagamento.data_pagamento), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                          ) : (
+                            <span className="text-xs sm:text-sm text-gray-400">-</span>
+                          )}
                         </td>
                         <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
                           <span className="text-xs sm:text-sm text-gray-900">
@@ -374,17 +540,34 @@ export default function DashboardFinanceiro() {
                           )}
                         </td>
                         <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
-                          <button
-                            onClick={() => handleTogglePago(pagamento.id, pagamento.pago)}
-                            className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                              pagamento.pago
-                                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                : 'bg-primary text-white hover:bg-opacity-90'
-                            }`}
-                          >
-                            <span className="hidden md:inline">{pagamento.pago ? 'Marcar Pendente' : 'Marcar como Pago'}</span>
-                            <span className="md:hidden">{pagamento.pago ? 'Pend.' : 'Pago'}</span>
-                          </button>
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleTogglePago(pagamento.id, pagamento.pago)}
+                              className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                                pagamento.pago
+                                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                  : 'bg-primary text-white hover:bg-opacity-90'
+                              }`}
+                            >
+                              <span className="hidden md:inline">{pagamento.pago ? 'Marcar Pendente' : 'Marcar como Pago'}</span>
+                              <span className="md:hidden">{pagamento.pago ? 'Pend.' : 'Pago'}</span>
+                            </button>
+                            <button
+                              onClick={() => handleEditarPagamento(pagamento)}
+                              className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                              title="Editar pagamento"
+                            >
+                              <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </button>
+                            <button
+                              onClick={() => handleExcluirPagamento(pagamento.id)}
+                              disabled={deletingPagamento}
+                              className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                              title="Excluir pagamento"
+                            >
+                              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -404,6 +587,8 @@ export default function DashboardFinanceiro() {
           setPagamentoForm({
             paciente_id: '',
             data: '',
+            data_vencimento: '',
+            data_pagamento: '',
             valor_sessao: '',
             desconto: '0',
             pago: false
@@ -448,9 +633,10 @@ export default function DashboardFinanceiro() {
                 {
                   paciente_id: pagamentoForm.paciente_id,
                   data: pagamentoForm.data,
+                  data_vencimento: pagamentoForm.data_vencimento || null,
+                  data_pagamento: pagamentoForm.data_pagamento || null,
                   valor_sessao: valorSessao,
                   desconto: desconto,
-                  valor_final: valorFinal,
                   pago: pagamentoForm.pago,
                   compareceu: null,
                   previsao: false
@@ -464,6 +650,7 @@ export default function DashboardFinanceiro() {
             setPagamentoForm({
               paciente_id: '',
               data: format(new Date(), 'yyyy-MM-dd'),
+              data_pagamento: '',
               valor_sessao: '',
               desconto: '0',
               pago: false
@@ -520,7 +707,7 @@ export default function DashboardFinanceiro() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Data *
+              Data da Consulta *
             </label>
             <input
               type="date"
@@ -529,6 +716,36 @@ export default function DashboardFinanceiro() {
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
               required
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data de Vencimento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_vencimento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_vencimento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Se não informado, usa a data da consulta como vencimento.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data do Pagamento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_pagamento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_pagamento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Preenchido automaticamente ao marcar como pago.
+            </p>
           </div>
 
           <div>
@@ -609,6 +826,7 @@ export default function DashboardFinanceiro() {
                 setPagamentoForm({
                   paciente_id: '',
                   data: format(new Date(), 'yyyy-MM-dd'),
+                  data_pagamento: '',
                   valor_sessao: '',
                   desconto: '0',
                   pago: false
@@ -625,6 +843,219 @@ export default function DashboardFinanceiro() {
               className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
             >
               {savingPagamento ? 'Salvando...' : 'Criar Pagamento'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal de Editar Pagamento */}
+      <Modal
+        isOpen={showEditarPagamentoModal}
+        onClose={() => {
+          setShowEditarPagamentoModal(false)
+          setPagamentoEditando(null)
+          setPagamentoForm({
+            paciente_id: '',
+            data: format(new Date(), 'yyyy-MM-dd'),
+            data_pagamento: '',
+            valor_sessao: '',
+            desconto: '0',
+            pago: false
+          })
+          setPagamentoError('')
+        }}
+        title="Editar Pagamento"
+        size="md"
+      >
+        {pagamentoError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <span className="text-sm text-red-800">{pagamentoError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSalvarEdicao} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Paciente *
+            </label>
+            <select
+              value={pagamentoForm.paciente_id}
+              onChange={async (e) => {
+                const pacienteId = e.target.value
+                setPagamentoForm(prev => ({ ...prev, paciente_id: pacienteId }))
+                
+                // Buscar valor da sessão do paciente
+                if (pacienteId) {
+                  try {
+                    const { data: paciente } = await supabase
+                      .from('pacientes')
+                      .select('valor_sessao')
+                      .eq('id', pacienteId)
+                      .single()
+                    
+                    if (paciente?.valor_sessao) {
+                      setPagamentoForm(prev => ({ 
+                        ...prev, 
+                        valor_sessao: paciente.valor_sessao.toString()
+                      }))
+                    }
+                  } catch (error) {
+                    console.error('Erro ao buscar valor da sessão:', error)
+                  }
+                }
+              }}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="">Selecione um paciente</option>
+              {pacientes.map((paciente) => (
+                <option key={paciente.id} value={paciente.id}>
+                  {paciente.nome_completo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data da Consulta *
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data de Vencimento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_vencimento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_vencimento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Se não informado, usa a data da consulta como vencimento.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data do Pagamento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_pagamento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_pagamento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Preenchido automaticamente ao marcar como pago.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Valor da Sessão (R$) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.valor_sessao}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, valor_sessao: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Desconto (R$)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.desconto}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, desconto: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Status
+            </label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pago-edit"
+                  checked={!pagamentoForm.pago}
+                  onChange={() => setPagamentoForm(prev => ({ ...prev, pago: false }))}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Pendente</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pago-edit"
+                  checked={pagamentoForm.pago}
+                  onChange={() => setPagamentoForm(prev => ({ ...prev, pago: true }))}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Pago</span>
+              </label>
+            </div>
+          </div>
+
+          {pagamentoForm.valor_sessao && (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Valor Final:</span>
+                <span className="text-lg font-bold text-gray-900">
+                  R$ {((parseFloat(pagamentoForm.valor_sessao) || 0) - (parseFloat(pagamentoForm.desconto) || 0)).toFixed(2).replace('.', ',')}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditarPagamentoModal(false)
+                setPagamentoEditando(null)
+                setPagamentoForm({
+                  paciente_id: '',
+                  data: format(new Date(), 'yyyy-MM-dd'),
+                  data_pagamento: '',
+                  valor_sessao: '',
+                  desconto: '0',
+                  pago: false
+                })
+                setPagamentoError('')
+              }}
+              className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={savingPagamento}
+              className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
+            >
+              {savingPagamento ? 'Salvando...' : 'Salvar Alterações'}
             </button>
           </div>
         </form>

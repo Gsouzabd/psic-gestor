@@ -45,13 +45,16 @@ export default function Confirmacoes() {
         `)
         .eq('pacientes.psicologo_id', user.id)
         .not('confirmada_pelo_paciente', 'is', null)
+        .not('confirmada_em', 'is', null)
         .order('confirmada_em', { ascending: false })
 
       // Aplicar filtro
       if (filter === 'confirmadas') {
         query = query.eq('confirmada_pelo_paciente', true)
       } else if (filter === 'canceladas') {
-        query = query.eq('confirmada_pelo_paciente', false)
+        query = query
+          .eq('confirmada_pelo_paciente', false)
+          .not('confirmada_em', 'is', null)
       }
 
       const { data, error } = await query

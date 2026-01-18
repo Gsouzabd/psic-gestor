@@ -55,6 +55,8 @@ export default function Dashboard() {
   const [multipleSessions, setMultipleSessions] = useState([])
   const [multipleSessionsDate, setMultipleSessionsDate] = useState(null)
   const [notifyingSessaoId, setNotifyingSessaoId] = useState(null)
+  const [notificationUseApelido, setNotificationUseApelido] = useState(false)
+  const [notificationUseApelidoMap, setNotificationUseApelidoMap] = useState({})
   const [pacientes, setPacientes] = useState([])
   const [agendamentoForm, setAgendamentoForm] = useState({
     paciente_id: '',
@@ -247,7 +249,7 @@ export default function Dashboard() {
       // Buscar sessões agendadas (incluindo campos de confirmação do paciente)
       const { data: sessoesAgendadasData } = await supabase
         .from('sessoes_agendadas')
-        .select('*, pacientes!inner(id, nome_completo, psicologo_id), recorrencia_id, confirmada_pelo_paciente, confirmada_em, tipo_consulta, link_meet')
+        .select('*, pacientes!inner(id, nome_completo, apelido, psicologo_id), recorrencia_id, confirmada_pelo_paciente, confirmada_em, tipo_consulta, link_meet')
         .eq('pacientes.psicologo_id', user.id)
         .order('data', { ascending: true })
       
@@ -301,7 +303,7 @@ export default function Dashboard() {
       // Buscar sessões agendadas de hoje
       const { data: sessoesAgendadasHoje, error } = await supabase
         .from('sessoes_agendadas')
-        .select('*, pacientes!inner(id, nome_completo, psicologo_id), confirmada_pelo_paciente, confirmada_em, tipo_consulta, link_meet')
+        .select('*, pacientes!inner(id, nome_completo, apelido, psicologo_id), confirmada_pelo_paciente, confirmada_em, tipo_consulta, link_meet')
         .eq('pacientes.psicologo_id', user.id)
         .eq('data', hojeStr)
         .is('compareceu', null)
@@ -931,6 +933,19 @@ export default function Dashboard() {
                     )}
                   </div>
                 )}
+                {selectedSession.confirmada_pelo_paciente === false && selectedSession.confirmada_em !== null && (
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <span className="flex items-center gap-2 text-red-600">
+                      <XCircle className="w-5 h-5" />
+                      Cancelada pelo paciente
+                    </span>
+                    {selectedSession.confirmada_em && (
+                      <p className="text-xs text-gray-500 mt-1 ml-7">
+                        Cancelada em: {format(new Date(selectedSession.confirmada_em), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             {selectedSession.anotacoes && (
@@ -941,21 +956,39 @@ export default function Dashboard() {
             )}
             {/* Botão NOTIFICAR PACIENTE - apenas para sessões agendadas (compareceu === null) e não confirmadas */}
             {selectedSession.compareceu === null && selectedSession.id && selectedSession.confirmada_pelo_paciente !== true && (
-              <button
-                onClick={async () => {
-                  try {
-                    await notifyPatient(selectedSession.id)
-                    success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
-                  } catch (error) {
-                    const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
-                    showError(message)
-                  }
-                }}
-                className="w-full bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
-              >
-                <MessageSquare className="w-5 h-5" />
-                NOTIFICAR PACIENTE
-              </button>
+              <div className="space-y-3">
+                {selectedSession.pacientes?.apelido && selectedSession.pacientes.apelido.trim() !== '' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Notificar como:
+                    </label>
+                    <select
+                      value={notificationUseApelido ? 'apelido' : 'nome'}
+                      onChange={(e) => setNotificationUseApelido(e.target.value === 'apelido')}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                    >
+                      <option value="nome">Nome completo</option>
+                      <option value="apelido">Apelido</option>
+                    </select>
+                  </div>
+                )}
+                <button
+                  onClick={async () => {
+                    try {
+                      await notifyPatient(selectedSession.id, notificationUseApelido)
+                      success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                      setNotificationUseApelido(false)
+                    } catch (error) {
+                      const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                      showError(message)
+                    }
+                  }}
+                  className="w-full bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                  NOTIFICAR PACIENTE
+                </button>
+              </div>
             )}
             <button
               onClick={() => {
@@ -1030,25 +1063,46 @@ export default function Dashboard() {
                     Ver Detalhes
                   </button>
                   {sessao.compareceu === null && sessao.id && sessao.confirmada_pelo_paciente !== true && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          setNotifyingSessaoId(sessao.id)
-                          await notifyPatient(sessao.id)
-                          success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
-                        } catch (error) {
-                          const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
-                          showError(message)
-                        } finally {
-                          setNotifyingSessaoId(null)
-                        }
-                      }}
-                      disabled={notifyingSessaoId === sessao.id}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                      {notifyingSessaoId === sessao.id ? 'Enviando...' : 'Notificar'}
-                    </button>
+                    <div className="flex gap-2">
+                      {sessao.pacientes?.apelido && sessao.pacientes.apelido.trim() !== '' && (
+                        <select
+                          value={notificationUseApelidoMap[sessao.id] ? 'apelido' : 'nome'}
+                          onChange={(e) => setNotificationUseApelidoMap(prev => ({
+                            ...prev,
+                            [sessao.id]: e.target.value === 'apelido'
+                          }))}
+                          className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition text-sm"
+                          disabled={notifyingSessaoId === sessao.id}
+                        >
+                          <option value="nome">Nome</option>
+                          <option value="apelido">Apelido</option>
+                        </select>
+                      )}
+                      <button
+                        onClick={async () => {
+                          try {
+                            setNotifyingSessaoId(sessao.id)
+                            await notifyPatient(sessao.id, notificationUseApelidoMap[sessao.id] || false)
+                            success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                            setNotificationUseApelidoMap(prev => {
+                              const newMap = { ...prev }
+                              delete newMap[sessao.id]
+                              return newMap
+                            })
+                          } catch (error) {
+                            const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                            showError(message)
+                          } finally {
+                            setNotifyingSessaoId(null)
+                          }
+                        }}
+                        disabled={notifyingSessaoId === sessao.id}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        {notifyingSessaoId === sessao.id ? 'Enviando...' : 'Notificar'}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1318,25 +1372,46 @@ export default function Dashboard() {
                         Ver Detalhes
                       </button>
                       {consulta.compareceu === null && consulta.id && consulta.confirmada_pelo_paciente !== true && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              setNotifyingSessaoId(consulta.id)
-                              await notifyPatient(consulta.id)
-                              success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
-                            } catch (error) {
-                              const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
-                              showError(message)
-                            } finally {
-                              setNotifyingSessaoId(null)
-                            }
-                          }}
-                          disabled={notifyingSessaoId === consulta.id}
-                          className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                          {notifyingSessaoId === consulta.id ? 'Enviando...' : 'Notificar'}
-                        </button>
+                        <div className="flex gap-2">
+                          {consulta.pacientes?.apelido && consulta.pacientes.apelido.trim() !== '' && (
+                            <select
+                              value={notificationUseApelidoMap[consulta.id] ? 'apelido' : 'nome'}
+                              onChange={(e) => setNotificationUseApelidoMap(prev => ({
+                                ...prev,
+                                [consulta.id]: e.target.value === 'apelido'
+                              }))}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition text-sm"
+                              disabled={notifyingSessaoId === consulta.id}
+                            >
+                              <option value="nome">Nome</option>
+                              <option value="apelido">Apelido</option>
+                            </select>
+                          )}
+                          <button
+                            onClick={async () => {
+                              try {
+                                setNotifyingSessaoId(consulta.id)
+                                await notifyPatient(consulta.id, notificationUseApelidoMap[consulta.id] || false)
+                                success('Notificação enviada com sucesso! O paciente receberá uma mensagem no WhatsApp.')
+                                setNotificationUseApelidoMap(prev => {
+                                  const newMap = { ...prev }
+                                  delete newMap[consulta.id]
+                                  return newMap
+                                })
+                              } catch (error) {
+                                const message = error?.message || 'Erro ao enviar notificação. Tente novamente.'
+                                showError(message)
+                              } finally {
+                                setNotifyingSessaoId(null)
+                              }
+                            }}
+                            disabled={notifyingSessaoId === consulta.id}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            {notifyingSessaoId === consulta.id ? 'Enviando...' : 'Notificar'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>

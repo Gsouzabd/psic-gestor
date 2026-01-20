@@ -9,8 +9,8 @@ export default function Pacientes() {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const { success, error: showError } = useToast()
-  const [pacientes, setPacientes] = useState([])
-  const [filteredPacientes, setFilteredPacientes] = useState([])
+  const [pacientes, setPacientes] = useState<any[]>([])
+  const [filteredPacientes, setFilteredPacientes] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [showNewModal, setShowNewModal] = useState(false)
@@ -51,7 +51,7 @@ export default function Pacientes() {
 
   useEffect(() => {
     if (searchTerm) {
-      const filtered = pacientes.filter(p =>
+      const filtered = pacientes.filter((p: any) =>
         p.nome_completo.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.telefone?.includes(searchTerm)
@@ -67,7 +67,7 @@ export default function Pacientes() {
       const { data, error } = await supabase
         .from('pacientes')
         .select('*')
-        .eq('psicologo_id', user.id)
+        .eq('psicologo_id', user?.id)
         .order('nome_completo', { ascending: true })
 
       if (error) throw error
@@ -80,12 +80,12 @@ export default function Pacientes() {
     }
   }
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  const handleCEPChange = (e) => {
+  const handleCEPChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { value } = e.target
     const cepFormatado = formatarCEP(value)
     setFormData(prev => ({
@@ -108,7 +108,7 @@ export default function Pacientes() {
           estado: dados.estado
         }))
         success('Endereço preenchido automaticamente!')
-      } catch (error) {
+      } catch (error: any) {
         showError(error.message || 'Erro ao buscar CEP')
       } finally {
         setBuscandoCEP(false)
@@ -138,7 +138,7 @@ export default function Pacientes() {
     setError('')
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setSaving(true)
@@ -149,7 +149,7 @@ export default function Pacientes() {
         .insert([
           {
             ...formData,
-            psicologo_id: user.id,
+            psicologo_id: user?.id,
             idade: formData.idade ? parseInt(formData.idade) : null,
             valor_sessao: formData.valor_sessao ? parseFloat(formData.valor_sessao) : 0
           }
@@ -189,7 +189,7 @@ export default function Pacientes() {
       
       // Navegar para detalhes do paciente na aba de dados pessoais
       navigate(`/pacientes/${data.id}?tab=dados`)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao criar paciente:', error)
       const message = error?.message || 'Erro ao criar paciente. Tente novamente.'
       showError(message)
@@ -199,7 +199,7 @@ export default function Pacientes() {
     }
   }
 
-  const handleDeletePaciente = async (pacienteId, pacienteNome) => {
+  const handleDeletePaciente = async (pacienteId: string, pacienteNome: string) => {
     if (!confirm(`Tem certeza que deseja excluir o paciente "${pacienteNome}"?\n\nEsta ação não pode ser desfeita e todos os dados relacionados (anamnese, prontuários e pagamentos) serão removidos.`)) {
       return
     }
@@ -212,7 +212,7 @@ export default function Pacientes() {
         .eq('paciente_id', pacienteId)
 
       if (prontuarios && prontuarios.length > 0) {
-        const prontuarioIds = prontuarios.map(p => p.id)
+        const prontuarioIds = prontuarios.map((p: any) => p.id)
         
         // Deletar pagamentos relacionados aos prontuários
         await supabase
@@ -259,7 +259,7 @@ export default function Pacientes() {
       
       // Atualizar lista de pacientes
       fetchPacientes()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao deletar paciente:', error)
       const message = error?.message || 'Erro ao deletar paciente. Tente novamente.'
       showError(message)
@@ -329,7 +329,7 @@ export default function Pacientes() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-            {filteredPacientes.map(paciente => (
+            {filteredPacientes.map((paciente: any) => (
               <PatientCard 
                 key={paciente.id} 
                 patient={paciente} 
@@ -621,4 +621,3 @@ export default function Pacientes() {
     </Layout>
   )
 }
-

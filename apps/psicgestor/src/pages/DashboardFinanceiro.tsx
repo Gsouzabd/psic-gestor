@@ -1,0 +1,1066 @@
+import { useState, useEffect, useCallback } from 'react'
+import Layout from '../components/Layout'
+import { Modal, supabase, useAuth, useToast } from '@gestor/core'
+import { DollarSign, CheckCircle, Clock, AlertCircle, Plus, Filter, Edit, Trash2 } from 'lucide-react'
+import { format } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
+
+// Função para criar Date a partir de string YYYY-MM-DD no fuso horário local
+const parseLocalDate = (dateString: string | null) => {
+  if (!dateString) return new Date()
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+export default function DashboardFinanceiro() {
+  const { user } = useAuth()
+  const { success, error: showError } = useToast()
+  const [loading, setLoading] = useState(true)
+  const [pacientes, setPacientes] = useState<any[]>([])
+  const [pagamentos, setPagamentos] = useState<any[]>([])
+  
+  // Filtros
+  const [filtroPeriodo, setFiltroPeriodo] = useState<'semana' | 'mes' | 'personalizado'>('mes')
+  const [dataInicio, setDataInicio] = useState('')
+  const [dataFim, setDataFim] = useState('')
+  const [filtroPaciente, setFiltroPaciente] = useState('todos')
+  const [filtroTipoData, setFiltroTipoData] = useState<'consulta' | 'vencimento' | 'pagamento'>('consulta')
+  
+  // Dashboard Financeiro
+  const [dashboardFinanceiro, setDashboardFinanceiro] = useState({
+    pago: 0,
+    aReceber: 0,
+    atrasado: 0
+  })
+  
+  // Modal Novo Pagamento
+  const [showNovoPagamentoModal, setShowNovoPagamentoModal] = useState(false)
+  const [savingPagamento, setSavingPagamento] = useState(false)
+  const [pagamentoError, setPagamentoError] = useState('')
+  const [pagamentoForm, setPagamentoForm] = useState({
+    paciente_id: '',
+    data: '',
+    data_vencimento: '',
+    data_pagamento: '',
+    valor_sessao: '',
+    desconto: '0',
+    pago: false
+  })
+
+  // Modal Editar Pagamento
+  const [showEditarPagamentoModal, setShowEditarPagamentoModal] = useState(false)
+  const [pagamentoEditando, setPagamentoEditando] = useState<any>(null)
+  const [deletingPagamento, setDeletingPagamento] = useState(false)
+
+  // Função para calcular período baseado no filtro
+  const calcularPeriodo = () => {
+    const hoje = new Date()
+    let inicio: Date, fim: Date
+    
+    switch (filtroPeriodo) {
+      case 'semana':
+        const diaSemana = hoje.getDay()
+        const diaMes = hoje.getDate()
+        inicio = new Date(hoje)
+        inicio.setDate(diaMes - diaSemana)
+        fim = new Date(hoje)
+        fim.setDate(diaMes - diaSemana + 6)
+        break
+      case 'mes':
+        inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
+        fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)
+        break
+      case 'personalizado':
+        inicio = dataInicio ? new Date(dataInicio) : new Date()
+        fim = dataFim ? new Date(dataFim) : new Date()
+        break
+      default:
+        inicio = new Date()
+        fim = new Date()
+    }
+    
+    return {
+      inicio: inicio.toISOString().split('T')[0],
+      fim: fim.toISOString().split('T')[0]
+    }
+  }
+
+  const fetchPacientes = async () => {
+    if (!user) return
+    
+    try {
+      const { data, error } = await supabase
+        .from('pacientes')
+        .select('id, nome_completo')
+        .eq('psicologo_id', user.id)
+        .order('nome_completo', { ascending: true })
+
+      if (error) throw error
+      setPacientes(data || [])
+    } catch (error) {
+      console.error('Erro ao buscar pacientes:', error)
+    }
+  }
+
+  // Função para buscar pagamentos financeiros com filtros
+  const fetchPagamentosFinanceiro = useCallback(async () => {
+    if (!user) return
+    
+    try {
+      const periodo = calcularPeriodo()
+      const hoje = new Date()
+      
+      // Calcular ontem (D-1) para determinar o que está atrasado
+      const ontem = new Date(hoje)
+      ontem.setDate(ontem.getDate() - 1)
+      const ontemStr = ontem.toISOString().split('T')[0]
+      
+      let query = supabase
+        .from('pagamentos')
+        .select('*, pacientes!inner(id, nome_completo, psicologo_id)')
+        .eq('pacientes.psicologo_id', user.id)
+      
+      // Aplicar filtro de período baseado no tipo de data selecionado
+      let campoData = 'data'
+      if (filtroTipoData === 'pagamento') {
+        campoData = 'data_pagamento'
+      } else if (filtroTipoData === 'vencimento') {
+        campoData = 'data_vencimento'
+      }
+      
+      query = query
+        .gte(campoData, periodo.inicio)
+        .lte(campoData, periodo.fim)
+        .order('data', { ascending: false })
+      
+      // Aplicar filtro de paciente se não for "todos"
+      if (filtroPaciente !== 'todos') {
+        query = query.eq('paciente_id', filtroPaciente)
+      }
+      
+      const { data: pagamentosData, error } = await query
+      
+      if (error) throw error
+      
+      setPagamentos(pagamentosData || [])
+      
+      let pago = 0
+      let aReceber = 0
+      let atrasado = 0
+      
+      if (pagamentosData) {
+        pagamentosData.forEach((pagamento: any) => {
+          const valor = parseFloat(pagamento.valor_final) || 0
+          if (pagamento.pago === true) {
+            pago += valor
+          } else {
+            // Considera atrasado se a data de vencimento (ou data da consulta se não houver vencimento) é menor ou igual a ontem (D+1)
+            const dataVencimento = pagamento.data_vencimento || pagamento.data
+            if (dataVencimento && dataVencimento <= ontemStr) {
+              atrasado += valor
+            } else {
+              aReceber += valor
+            }
+          }
+        })
+      }
+      
+      setDashboardFinanceiro({ pago, aReceber, atrasado })
+    } catch (error) {
+      console.error('Erro ao buscar pagamentos financeiros:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [user, filtroPeriodo, dataInicio, dataFim, filtroPaciente, filtroTipoData])
+
+  useEffect(() => {
+    if (user) {
+      fetchPacientes()
+      fetchPagamentosFinanceiro()
+    }
+  }, [user, fetchPagamentosFinanceiro])
+
+  const handleTogglePago = async (pagamentoId: string, pagoAtual: boolean) => {
+    try {
+      const novoPago = !pagoAtual
+      const updateData = {
+        pago: novoPago,
+        data_pagamento: novoPago ? format(new Date(), 'yyyy-MM-dd') : null
+      }
+
+      const { error } = await supabase
+        .from('pagamentos')
+        .update(updateData)
+        .eq('id', pagamentoId)
+
+      if (error) throw error
+      fetchPagamentosFinanceiro()
+      success('Status do pagamento atualizado!')
+    } catch (error) {
+      console.error('Erro ao atualizar pagamento:', error)
+      showError('Erro ao atualizar pagamento')
+    }
+  }
+
+  const handleEditarPagamento = (pagamento: any) => {
+    setPagamentoEditando(pagamento)
+    setPagamentoForm({
+      paciente_id: pagamento.paciente_id,
+      data: pagamento.data,
+      data_vencimento: pagamento.data_vencimento || '',
+      data_pagamento: pagamento.data_pagamento || '',
+      valor_sessao: pagamento.valor_sessao?.toString() || '',
+      desconto: pagamento.desconto?.toString() || '0',
+      pago: pagamento.pago || false
+    })
+    setPagamentoError('')
+    setShowEditarPagamentoModal(true)
+  }
+
+  const handleExcluirPagamento = async (pagamentoId: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir este pagamento? Esta ação não pode ser desfeita.')) {
+      return
+    }
+
+    setDeletingPagamento(true)
+    try {
+      const { error } = await supabase
+        .from('pagamentos')
+        .delete()
+        .eq('id', pagamentoId)
+
+      if (error) throw error
+      fetchPagamentosFinanceiro()
+      success('Pagamento excluído com sucesso!')
+    } catch (error) {
+      console.error('Erro ao excluir pagamento:', error)
+      showError('Erro ao excluir pagamento')
+    } finally {
+      setDeletingPagamento(false)
+    }
+  }
+
+  const handleSalvarEdicao = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPagamentoError('')
+    setSavingPagamento(true)
+
+    try {
+      if (!pagamentoForm.paciente_id || !pagamentoForm.data || !pagamentoForm.valor_sessao) {
+        setPagamentoError('Por favor, preencha todos os campos obrigatórios.')
+        setSavingPagamento(false)
+        return
+      }
+
+      const valorSessao = parseFloat(pagamentoForm.valor_sessao) || 0
+      const desconto = parseFloat(pagamentoForm.desconto) || 0
+      const valorFinal = valorSessao - desconto
+
+      if (valorFinal < 0) {
+        setPagamentoError('O valor final não pode ser negativo.')
+        setSavingPagamento(false)
+        return
+      }
+
+      const { error } = await supabase
+        .from('pagamentos')
+        .update({
+          paciente_id: pagamentoForm.paciente_id,
+          data: pagamentoForm.data,
+          data_vencimento: pagamentoForm.data_vencimento || null,
+          data_pagamento: pagamentoForm.data_pagamento || null,
+          valor_sessao: valorSessao,
+          desconto: desconto,
+          pago: pagamentoForm.pago
+        })
+        .eq('id', pagamentoEditando.id)
+
+      if (error) throw error
+
+      success('Pagamento atualizado com sucesso!')
+      setShowEditarPagamentoModal(false)
+      setPagamentoEditando(null)
+      setPagamentoForm({
+        paciente_id: '',
+        data: format(new Date(), 'yyyy-MM-dd'),
+        data_vencimento: '',
+        data_pagamento: '',
+        valor_sessao: '',
+        desconto: '0',
+        pago: false
+      })
+      fetchPagamentosFinanceiro()
+    } catch (error) {
+      console.error('Erro ao atualizar pagamento:', error)
+      setPagamentoError('Erro ao atualizar pagamento. Tente novamente.')
+    } finally {
+      setSavingPagamento(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
+      </Layout>
+    )
+  }
+
+  return (
+    <Layout>
+      <div className="space-y-6 sm:space-y-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Dashboard Financeiro</h1>
+            <p className="text-sm sm:text-base text-gray-600 mt-1">Controle financeiro completo</p>
+          </div>
+          <button
+            onClick={() => {
+              setPagamentoForm({
+                paciente_id: '',
+                data: format(new Date(), 'yyyy-MM-dd'),
+                data_vencimento: '',
+                data_pagamento: '',
+                valor_sessao: '',
+                desconto: '0',
+                pago: false
+              })
+              setPagamentoError('')
+              setShowNovoPagamentoModal(true)
+            }}
+            className="flex items-center justify-center gap-2 bg-primary text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg font-medium hover:bg-opacity-90 transition shadow-sm hover:shadow-md text-sm sm:text-base w-full sm:w-auto"
+          >
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+            Novo Pagamento
+          </button>
+        </div>
+
+        {/* Filtros */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="flex flex-col gap-4 sm:gap-6">
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Filter className="w-4 h-4 inline mr-2" />
+                  Período
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    value={filtroPeriodo}
+                    onChange={(e) => setFiltroPeriodo(e.target.value as 'semana' | 'mes' | 'personalizado')}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                  >
+                    <option value="semana">Semana</option>
+                    <option value="mes">Mês</option>
+                    <option value="personalizado">Período Personalizado</option>
+                  </select>
+                  {filtroPeriodo === 'personalizado' && (
+                    <>
+                      <input
+                        type="date"
+                        value={dataInicio}
+                        onChange={(e) => setDataInicio(e.target.value)}
+                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                        placeholder="Data inicial"
+                      />
+                      <input
+                        type="date"
+                        value={dataFim}
+                        onChange={(e) => setDataFim(e.target.value)}
+                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                        placeholder="Data final"
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Paciente
+                </label>
+                <select
+                  value={filtroPaciente}
+                  onChange={(e) => setFiltroPaciente(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                >
+                  <option value="todos">Todos os pacientes</option>
+                  {pacientes.map((paciente: any) => (
+                    <option key={paciente.id} value={paciente.id}>
+                      {paciente.nome_completo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex-1 sm:max-w-xs">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Filtrar por
+              </label>
+              <select
+                value={filtroTipoData}
+                onChange={(e) => setFiltroTipoData(e.target.value as 'consulta' | 'vencimento' | 'pagamento')}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              >
+                <option value="consulta">Data da Consulta</option>
+                <option value="vencimento">Data de Vencimento</option>
+                <option value="pagamento">Data do Pagamento</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Cards de Resumo */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-gray-600">PAGO</p>
+              <div className="p-2 bg-green-100 rounded-lg">
+                <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+              </div>
+            </div>
+            <p className="text-2xl sm:text-3xl font-bold text-green-600">
+              R$ {dashboardFinanceiro.pago.toFixed(2).replace('.', ',')}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-gray-600">A RECEBER</p>
+              <div className="p-2 bg-yellow-100 rounded-lg">
+                <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+              </div>
+            </div>
+            <p className="text-2xl sm:text-3xl font-bold text-yellow-600">
+              R$ {dashboardFinanceiro.aReceber.toFixed(2).replace('.', ',')}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-gray-600">ATRASADO</p>
+              <div className="p-2 bg-red-100 rounded-lg">
+                <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600" />
+              </div>
+            </div>
+            <p className="text-2xl sm:text-3xl font-bold text-red-600">
+              R$ {dashboardFinanceiro.atrasado.toFixed(2).replace('.', ',')}
+            </p>
+          </div>
+        </div>
+
+        {/* Lista de Pagamentos */}
+        <div>
+          <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4">Pagamentos</h2>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            {pagamentos.length === 0 ? (
+              <div className="p-6 sm:p-8 text-center text-gray-500">
+                <DollarSign className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-3 text-gray-400" />
+                <p className="text-sm sm:text-base">Nenhum pagamento encontrado no período selecionado</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px]">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data Consulta</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Vencimento</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Data Pgto</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600 uppercase">Paciente</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Valor</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Desc.</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600 uppercase">Total</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
+                      <th className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-xs font-semibold text-gray-600 uppercase">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {pagamentos.map((pagamento: any) => (
+                      <tr key={pagamento.id} className="hover:bg-gray-50 transition">
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                          <span className="text-xs sm:text-sm text-gray-900">
+                            {format(parseLocalDate(pagamento.data), "dd/MM/yyyy", { locale: ptBR })}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                          {pagamento.data_vencimento ? (
+                            <span className="text-xs sm:text-sm text-orange-700 font-medium">
+                              {format(parseLocalDate(pagamento.data_vencimento), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                          ) : (
+                            <span className="text-xs sm:text-sm text-gray-500">
+                              {format(parseLocalDate(pagamento.data), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
+                          {pagamento.data_pagamento ? (
+                            <span className="text-xs sm:text-sm text-green-700 font-medium">
+                              {format(parseLocalDate(pagamento.data_pagamento), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                          ) : (
+                            <span className="text-xs sm:text-sm text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+                          <span className="text-xs sm:text-sm text-gray-900">
+                            {pagamento.pacientes?.nome_completo || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
+                          <span className="text-xs sm:text-sm text-gray-900">
+                            R$ {parseFloat(pagamento.valor_sessao || 0).toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
+                          <span className="text-xs sm:text-sm text-gray-600">
+                            {parseFloat(pagamento.desconto || 0) > 0 ? `-R$ ${parseFloat(pagamento.desconto || 0).toFixed(2)}` : '-'}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
+                          <span className="text-xs sm:text-sm font-semibold text-gray-900">
+                            R$ {parseFloat(pagamento.valor_final || 0).toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
+                          {pagamento.pago ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                              <CheckCircle className="w-3 h-3" />
+                              <span className="hidden sm:inline">Pago</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                              <Clock className="w-3 h-3" />
+                              <span className="hidden sm:inline">Pendente</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleTogglePago(pagamento.id, pagamento.pago)}
+                              className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                                pagamento.pago
+                                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                  : 'bg-primary text-white hover:bg-opacity-90'
+                              }`}
+                            >
+                              <span className="hidden md:inline">{pagamento.pago ? 'Marcar Pendente' : 'Marcar como Pago'}</span>
+                              <span className="md:hidden">{pagamento.pago ? 'Pend.' : 'Pago'}</span>
+                            </button>
+                            <button
+                              onClick={() => handleEditarPagamento(pagamento)}
+                              className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                              title="Editar pagamento"
+                            >
+                              <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </button>
+                            <button
+                              onClick={() => handleExcluirPagamento(pagamento.id)}
+                              disabled={deletingPagamento}
+                              className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                              title="Excluir pagamento"
+                            >
+                              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Modal de Novo Pagamento */}
+      <Modal
+        isOpen={showNovoPagamentoModal}
+        onClose={() => {
+          setShowNovoPagamentoModal(false)
+          setPagamentoForm({
+            paciente_id: '',
+            data: '',
+            data_vencimento: '',
+            data_pagamento: '',
+            valor_sessao: '',
+            desconto: '0',
+            pago: false
+          })
+          setPagamentoError('')
+        }}
+        title="Novo Pagamento"
+        size="md"
+      >
+        {pagamentoError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <span className="text-sm text-red-800">{pagamentoError}</span>
+          </div>
+        )}
+
+        <form onSubmit={async (e) => {
+          e.preventDefault()
+          setPagamentoError('')
+          setSavingPagamento(true)
+
+          try {
+            if (!pagamentoForm.paciente_id || !pagamentoForm.data || !pagamentoForm.valor_sessao) {
+              setPagamentoError('Por favor, preencha todos os campos obrigatórios.')
+              setSavingPagamento(false)
+              return
+            }
+
+            const valorSessao = parseFloat(pagamentoForm.valor_sessao) || 0
+            const desconto = parseFloat(pagamentoForm.desconto) || 0
+            const valorFinal = valorSessao - desconto
+
+            if (valorFinal < 0) {
+              setPagamentoError('O valor final não pode ser negativo.')
+              setSavingPagamento(false)
+              return
+            }
+
+            const { error } = await supabase
+              .from('pagamentos')
+              .insert([
+                {
+                  paciente_id: pagamentoForm.paciente_id,
+                  data: pagamentoForm.data,
+                  data_vencimento: pagamentoForm.data_vencimento || null,
+                  data_pagamento: pagamentoForm.data_pagamento || null,
+                  valor_sessao: valorSessao,
+                  desconto: desconto,
+                  pago: pagamentoForm.pago,
+                  compareceu: null,
+                  previsao: false
+                }
+              ])
+
+            if (error) throw error
+
+            success('Pagamento criado com sucesso!')
+            setShowNovoPagamentoModal(false)
+            setPagamentoForm({
+              paciente_id: '',
+              data: format(new Date(), 'yyyy-MM-dd'),
+              data_vencimento: '',
+              data_pagamento: '',
+              valor_sessao: '',
+              desconto: '0',
+              pago: false
+            })
+            fetchPagamentosFinanceiro()
+          } catch (error) {
+            console.error('Erro ao criar pagamento:', error)
+            setPagamentoError('Erro ao criar pagamento. Tente novamente.')
+          } finally {
+            setSavingPagamento(false)
+          }
+        }} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Paciente *
+            </label>
+            <select
+              value={pagamentoForm.paciente_id}
+              onChange={async (e) => {
+                const pacienteId = e.target.value
+                setPagamentoForm(prev => ({ ...prev, paciente_id: pacienteId }))
+                
+                // Buscar valor da sessão do paciente
+                if (pacienteId) {
+                  try {
+                    const { data: paciente } = await supabase
+                      .from('pacientes')
+                      .select('valor_sessao')
+                      .eq('id', pacienteId)
+                      .single()
+                    
+                    if (paciente?.valor_sessao) {
+                      setPagamentoForm(prev => ({ 
+                        ...prev, 
+                        valor_sessao: paciente.valor_sessao.toString()
+                      }))
+                    }
+                  } catch (error) {
+                    console.error('Erro ao buscar valor da sessão:', error)
+                  }
+                }
+              }}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="">Selecione um paciente</option>
+              {pacientes.map((paciente: any) => (
+                <option key={paciente.id} value={paciente.id}>
+                  {paciente.nome_completo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data da Consulta *
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data de Vencimento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_vencimento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_vencimento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Se não informado, usa a data da consulta como vencimento.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data do Pagamento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_pagamento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_pagamento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Preenchido automaticamente ao marcar como pago.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Valor da Sessão (R$) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.valor_sessao}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, valor_sessao: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Desconto (R$)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.desconto}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, desconto: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Status Inicial
+            </label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pago"
+                  checked={!pagamentoForm.pago}
+                  onChange={() => setPagamentoForm(prev => ({ ...prev, pago: false }))}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Pendente</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pago"
+                  checked={pagamentoForm.pago}
+                  onChange={() => setPagamentoForm(prev => ({ ...prev, pago: true }))}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Pago</span>
+              </label>
+            </div>
+          </div>
+
+          {pagamentoForm.valor_sessao && (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Valor Final:</span>
+                <span className="text-lg font-bold text-gray-900">
+                  R$ {((parseFloat(pagamentoForm.valor_sessao) || 0) - (parseFloat(pagamentoForm.desconto) || 0)).toFixed(2).replace('.', ',')}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowNovoPagamentoModal(false)
+                setPagamentoForm({
+                  paciente_id: '',
+                  data: format(new Date(), 'yyyy-MM-dd'),
+                  data_vencimento: '',
+                  data_pagamento: '',
+                  valor_sessao: '',
+                  desconto: '0',
+                  pago: false
+                })
+                setPagamentoError('')
+              }}
+              className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={savingPagamento}
+              className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
+            >
+              {savingPagamento ? 'Salvando...' : 'Criar Pagamento'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal de Editar Pagamento */}
+      <Modal
+        isOpen={showEditarPagamentoModal}
+        onClose={() => {
+          setShowEditarPagamentoModal(false)
+          setPagamentoEditando(null)
+          setPagamentoForm({
+            paciente_id: '',
+            data: format(new Date(), 'yyyy-MM-dd'),
+            data_vencimento: '',
+            data_pagamento: '',
+            valor_sessao: '',
+            desconto: '0',
+            pago: false
+          })
+          setPagamentoError('')
+        }}
+        title="Editar Pagamento"
+        size="md"
+      >
+        {pagamentoError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <span className="text-sm text-red-800">{pagamentoError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSalvarEdicao} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Paciente *
+            </label>
+            <select
+              value={pagamentoForm.paciente_id}
+              onChange={async (e) => {
+                const pacienteId = e.target.value
+                setPagamentoForm(prev => ({ ...prev, paciente_id: pacienteId }))
+                
+                // Buscar valor da sessão do paciente
+                if (pacienteId) {
+                  try {
+                    const { data: paciente } = await supabase
+                      .from('pacientes')
+                      .select('valor_sessao')
+                      .eq('id', pacienteId)
+                      .single()
+                    
+                    if (paciente?.valor_sessao) {
+                      setPagamentoForm(prev => ({ 
+                        ...prev, 
+                        valor_sessao: paciente.valor_sessao.toString()
+                      }))
+                    }
+                  } catch (error) {
+                    console.error('Erro ao buscar valor da sessão:', error)
+                  }
+                }
+              }}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            >
+              <option value="">Selecione um paciente</option>
+              {pacientes.map((paciente: any) => (
+                <option key={paciente.id} value={paciente.id}>
+                  {paciente.nome_completo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data da Consulta *
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data de Vencimento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_vencimento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_vencimento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Se não informado, usa a data da consulta como vencimento.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Data do Pagamento
+            </label>
+            <input
+              type="date"
+              value={pagamentoForm.data_pagamento}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, data_pagamento: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Opcional. Preenchido automaticamente ao marcar como pago.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Valor da Sessão (R$) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.valor_sessao}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, valor_sessao: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Desconto (R$)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={pagamentoForm.desconto}
+              onChange={(e) => setPagamentoForm(prev => ({ ...prev, desconto: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Status
+            </label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pago-edit"
+                  checked={!pagamentoForm.pago}
+                  onChange={() => setPagamentoForm(prev => ({ ...prev, pago: false }))}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Pendente</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pago-edit"
+                  checked={pagamentoForm.pago}
+                  onChange={() => setPagamentoForm(prev => ({ ...prev, pago: true }))}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Pago</span>
+              </label>
+            </div>
+          </div>
+
+          {pagamentoForm.valor_sessao && (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Valor Final:</span>
+                <span className="text-lg font-bold text-gray-900">
+                  R$ {((parseFloat(pagamentoForm.valor_sessao) || 0) - (parseFloat(pagamentoForm.desconto) || 0)).toFixed(2).replace('.', ',')}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditarPagamentoModal(false)
+                setPagamentoEditando(null)
+                setPagamentoForm({
+                  paciente_id: '',
+                  data: format(new Date(), 'yyyy-MM-dd'),
+                  data_vencimento: '',
+                  data_pagamento: '',
+                  valor_sessao: '',
+                  desconto: '0',
+                  pago: false
+                })
+                setPagamentoError('')
+              }}
+              className="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={savingPagamento}
+              className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-opacity-90 transition disabled:opacity-50"
+            >
+              {savingPagamento ? 'Salvando...' : 'Salvar Alterações'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </Layout>
+  )
+}

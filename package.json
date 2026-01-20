@@ -1,31 +1,27 @@
 {
-  "name": "psic-gestor",
+  "name": "psic-gestor-monorepo",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && node scripts/copy-htaccess.js",
-    "preview": "vite preview",
-    "lint": "echo 'No linter configured'"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.39.3",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.3",
-    "date-fns": "^3.3.1",
-    "lucide-react": "^0.323.0"
+    "dev:psic": "pnpm --filter psicgestor dev",
+    "dev:estetic": "pnpm --filter esteticgestor dev",
+    "build": "pnpm build:core && pnpm -r --filter './apps/*' build",
+    "build:core": "pnpm --filter @gestor/core build",
+    "build:psic": "pnpm build:core && pnpm --filter psicgestor build",
+    "build:estetic": "pnpm build:core && pnpm --filter esteticgestor build",
+    "preview:psic": "pnpm --filter psicgestor preview",
+    "preview:estetic": "pnpm --filter esteticgestor preview",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r exec rm -rf node_modules dist && rm -rf node_modules"
   },
   "devDependencies": {
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
-    "@vitejs/plugin-react": "^4.2.1",
-    "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.33",
-    "tailwindcss": "^3.4.1",
-    "vite": "^5.0.12"
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
   }
 }
-
-

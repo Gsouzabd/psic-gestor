@@ -598,7 +598,9 @@ export default function Dashboard() {
           valorSessao: valorSessao,
           criarPrevisao: agendamentoForm.criarPrevisao || false,
           tipoConsulta: agendamentoForm.tipo_consulta,
-          linkMeet: linkMeet
+          linkMeet: linkMeet,
+          modalidadePagamento: agendamentoForm.modalidadePagamento,
+          dataPagamentoUnico: agendamentoForm.dataPagamentoUnico || undefined
         })
 
         if (errors.length > 0) {

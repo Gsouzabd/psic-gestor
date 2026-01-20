@@ -14,6 +14,8 @@ export interface GenerateRecurringAppointmentsParams {
   criarPrevisao?: boolean
   tipoConsulta?: 'presencial' | 'online'
   linkMeet?: string | null
+  modalidadePagamento?: 'por_sessao' | 'unico'
+  dataPagamentoUnico?: string
 }
 
 export interface GenerateRecurringAppointmentsResult {
@@ -66,11 +68,16 @@ export async function generateRecurringAppointments({
   valorSessao = 0,
   criarPrevisao = false,
   tipoConsulta = 'presencial',
-  linkMeet = null
+  linkMeet = null,
+  modalidadePagamento = 'por_sessao',
+  dataPagamentoUnico
 }: GenerateRecurringAppointmentsParams): Promise<GenerateRecurringAppointmentsResult> {
   const dates = calculateRecurrenceDates(dataInicio, tipoRecorrencia, dataFim)
   const sessoesAgendadasIds: string[] = []
   const errors: Error[] = []
+
+  // Determinar se deve criar pagamento único agrupado
+  const criarPagamentoUnico = criarPrevisao && modalidadePagamento === 'unico' && dataPagamentoUnico
 
   for (let i = 0; i < dates.length; i++) {
     const data = dates[i]
@@ -101,8 +108,8 @@ export async function generateRecurringAppointments({
 
       sessoesAgendadasIds.push(sessaoAgendada.id)
 
-      // Criar pagamento previsto vinculado apenas se criarPrevisao for true
-      if (criarPrevisao) {
+      // Criar pagamento previsto por sessão apenas se não for pagamento único
+      if (criarPrevisao && !criarPagamentoUnico) {
         const { error: pagamentoError } = await supabase
           .from('pagamentos')
           .insert([
@@ -124,6 +131,37 @@ export async function generateRecurringAppointments({
       }
     } catch (error) {
       errors.push(new Error(`Erro inesperado ao criar agendamento para ${data}: ${(error as Error).message}`))
+    }
+  }
+
+  // Criar pagamento único agrupado após criar todas as sessões
+  if (criarPagamentoUnico && sessoesAgendadasIds.length > 0) {
+    try {
+      const quantidadeSessoes = sessoesAgendadasIds.length
+      const valorTotal = valorSessao * quantidadeSessoes
+
+      const { error: pagamentoError } = await supabase
+        .from('pagamentos')
+        .insert([
+          {
+            recorrencia_id: recorrenciaId,
+            paciente_id: pacienteId,
+            data: dataPagamentoUnico,
+            valor_sessao: valorTotal,
+            quantidade_sessoes: quantidadeSessoes,
+            desconto: 0,
+            compareceu: null,
+            pago: false,
+            previsao: true, // Pagamento previsto
+            sessao_agendada_id: null // Não vinculado a uma sessão específica
+          }
+        ])
+
+      if (pagamentoError) {
+        errors.push(new Error(`Erro ao criar pagamento único agrupado: ${pagamentoError.message}`))
+      }
+    } catch (error) {
+      errors.push(new Error(`Erro inesperado ao criar pagamento único agrupado: ${(error as Error).message}`))
     }
   }
 

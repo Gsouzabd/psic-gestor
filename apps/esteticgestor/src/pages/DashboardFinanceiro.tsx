@@ -25,6 +25,7 @@ export default function DashboardFinanceiro() {
   const [dataFim, setDataFim] = useState('')
   const [filtroPaciente, setFiltroPaciente] = useState('todos')
   const [filtroTipoData, setFiltroTipoData] = useState<'consulta' | 'vencimento' | 'pagamento'>('consulta')
+  const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pago' | 'aReceber' | 'atrasado'>('todos')
   
   // Dashboard Financeiro
   const [dashboardFinanceiro, setDashboardFinanceiro] = useState({
@@ -142,7 +143,26 @@ export default function DashboardFinanceiro() {
       
       if (error) throw error
       
-      setPagamentos(pagamentosData || [])
+      // Aplicar filtro de status se necessário
+      let pagamentosFiltrados = pagamentosData || []
+      
+      if (filtroStatus === 'pago') {
+        pagamentosFiltrados = pagamentosFiltrados.filter((p: any) => p.pago === true)
+      } else if (filtroStatus === 'aReceber') {
+        pagamentosFiltrados = pagamentosFiltrados.filter((p: any) => {
+          if (p.pago === true) return false
+          const dataVencimento = p.data_vencimento || p.data
+          return dataVencimento && dataVencimento > ontemStr
+        })
+      } else if (filtroStatus === 'atrasado') {
+        pagamentosFiltrados = pagamentosFiltrados.filter((p: any) => {
+          if (p.pago === true) return false
+          const dataVencimento = p.data_vencimento || p.data
+          return dataVencimento && dataVencimento <= ontemStr
+        })
+      }
+      
+      setPagamentos(pagamentosFiltrados)
       
       let pago = 0
       let aReceber = 0
@@ -171,7 +191,7 @@ export default function DashboardFinanceiro() {
     } finally {
       setLoading(false)
     }
-  }, [user, filtroPeriodo, dataInicio, dataFim, filtroPaciente, filtroTipoData])
+  }, [user, filtroPeriodo, dataInicio, dataFim, filtroPaciente, filtroTipoData, filtroStatus])
 
   useEffect(() => {
     if (user) {
@@ -413,7 +433,12 @@ export default function DashboardFinanceiro() {
 
         {/* Cards de Resumo */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div 
+            onClick={() => setFiltroStatus(filtroStatus === 'pago' ? 'todos' : 'pago')}
+            className={`bg-white rounded-xl shadow-sm border p-4 sm:p-6 cursor-pointer transition hover:shadow-md ${
+              filtroStatus === 'pago' ? 'border-green-500 border-2' : 'border-gray-200'
+            }`}
+          >
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium text-gray-600">PAGO</p>
               <div className="p-2 bg-green-100 rounded-lg">
@@ -425,7 +450,12 @@ export default function DashboardFinanceiro() {
             </p>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div 
+            onClick={() => setFiltroStatus(filtroStatus === 'aReceber' ? 'todos' : 'aReceber')}
+            className={`bg-white rounded-xl shadow-sm border p-4 sm:p-6 cursor-pointer transition hover:shadow-md ${
+              filtroStatus === 'aReceber' ? 'border-yellow-500 border-2' : 'border-gray-200'
+            }`}
+          >
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium text-gray-600">A RECEBER</p>
               <div className="p-2 bg-yellow-100 rounded-lg">
@@ -437,7 +467,12 @@ export default function DashboardFinanceiro() {
             </p>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div 
+            onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? 'todos' : 'atrasado')}
+            className={`bg-white rounded-xl shadow-sm border p-4 sm:p-6 cursor-pointer transition hover:shadow-md ${
+              filtroStatus === 'atrasado' ? 'border-red-500 border-2' : 'border-gray-200'
+            }`}
+          >
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium text-gray-600">ATRASADO</p>
               <div className="p-2 bg-red-100 rounded-lg">
@@ -449,6 +484,11 @@ export default function DashboardFinanceiro() {
             </p>
           </div>
         </div>
+        
+        {/* Informação sobre funcionalidade */}
+        <small className="text-xs text-gray-500 block mt-2">
+          💡 Clique nos cards acima para filtrar os pagamentos
+        </small>
 
         {/* Lista de Pagamentos */}
         <div>
@@ -479,9 +519,16 @@ export default function DashboardFinanceiro() {
                     {pagamentos.map((pagamento: any) => (
                       <tr key={pagamento.id} className="hover:bg-gray-50 transition">
                         <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
-                          <span className="text-xs sm:text-sm text-gray-900">
-                            {format(parseLocalDate(pagamento.data), "dd/MM/yyyy", { locale: ptBR })}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs sm:text-sm text-gray-900">
+                              {format(parseLocalDate(pagamento.data), "dd/MM/yyyy", { locale: ptBR })}
+                            </span>
+                            {pagamento.quantidade_sessoes && pagamento.quantidade_sessoes > 1 && (
+                              <span className="text-xs text-primary font-medium">
+                                {pagamento.quantidade_sessoes} sessões
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
                           {pagamento.data_vencimento ? (

@@ -62,7 +62,8 @@ export default function PagamentosTab({ pacienteId, paciente }: PagamentosTabPro
     // Pagamentos previstos que ainda não foram pagos (excluir os que foram marcados como pagos)
     const pagamentosPrevistosNaoPagos = pagamentosPrevistos.filter((p: any) => !p.pago)
     
-    const totalSessoes = pagamentosReais.length
+    // Contar sessões considerando quantidade_sessoes (para pagamentos agrupados)
+    const totalSessoes = pagamentosReais.reduce((sum: number, p: any) => sum + (p.quantidade_sessoes || 1), 0)
     const totalReceber = pagamentosReais.reduce((sum: number, p: any) => sum + parseFloat(p.valor_final || 0), 0)
     const totalRecebido = pagamentosReais
       .filter((p: any) => p.pago)
@@ -154,7 +155,7 @@ export default function PagamentosTab({ pacienteId, paciente }: PagamentosTabPro
       }
       
       agrupados[mesAno].pagamentos.push(pagamento)
-      agrupados[mesAno].totalSessoes++
+      agrupados[mesAno].totalSessoes += (pagamento.quantidade_sessoes || 1)
       agrupados[mesAno].totalReceber += parseFloat(pagamento.valor_final || 0)
       
       if (pagamento.pago) {
@@ -380,9 +381,16 @@ export default function PagamentosTab({ pacienteId, paciente }: PagamentosTabPro
                           {pagamentosMes.map((pagamento: any) => (
                             <tr key={pagamento.id} className="hover:bg-gray-50 transition">
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
-                                <span className="text-xs sm:text-sm text-gray-900">
-                                  {format(parseLocalDate(pagamento.data), "dd/MM/yy", { locale: ptBR })}
-                                </span>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-xs sm:text-sm text-gray-900">
+                                    {format(parseLocalDate(pagamento.data), "dd/MM/yy", { locale: ptBR })}
+                                  </span>
+                                  {pagamento.quantidade_sessoes && pagamento.quantidade_sessoes > 1 && (
+                                    <span className="text-xs text-primary font-medium">
+                                      {pagamento.quantidade_sessoes} sessões
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 whitespace-nowrap">
                                 {pagamento.compareceu === true ? (

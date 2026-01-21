@@ -8,6 +8,7 @@ interface PontoMarcacao {
   x: number // 0-100 (percentual)
   y: number // 0-100 (percentual)
   valor: number
+  toxina?: string // Descrição da toxina aplicada neste ponto
   regiao?: string
   observacao?: string
 }
@@ -28,6 +29,7 @@ export default function ToxinMarkerEditor({
   const [selectedPonto, setSelectedPonto] = useState<string | null>(null)
   const [editingPonto, setEditingPonto] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState<string>('')
+  const [editingToxina, setEditingToxina] = useState<string>('')
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
@@ -61,12 +63,14 @@ export default function ToxinMarkerEditor({
       id: `ponto-${Date.now()}`,
       x: Math.max(0, Math.min(100, x)),
       y: Math.max(0, Math.min(100, y)),
-      valor: 0
+      valor: 0,
+      toxina: ''
     }
 
     onPontosChange([...pontos, novoPonto])
     setEditingPonto(novoPonto.id)
     setEditingValue('')
+    setEditingToxina('')
   }
 
   const handlePontoClick = (e: React.MouseEvent, pontoId: string) => {
@@ -78,6 +82,7 @@ export default function ToxinMarkerEditor({
     e.stopPropagation()
     setEditingPonto(ponto.id)
     setEditingValue(ponto.valor.toString())
+    setEditingToxina(ponto.toxina || '')
   }
 
   const handleDragStart = (e: React.MouseEvent, ponto: PontoMarcacao) => {
@@ -125,14 +130,19 @@ export default function ToxinMarkerEditor({
     }
   }
 
-  const handleSaveValue = (pontoId: string) => {
+  const handleSaveValue = (pontoId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
     const valor = parseFloat(editingValue) || 0
     const updatedPontos = pontos.map(p =>
-      p.id === pontoId ? { ...p, valor } : p
+      p.id === pontoId ? { ...p, valor, toxina: editingToxina || undefined } : p
     )
     onPontosChange(updatedPontos)
     setEditingPonto(null)
     setEditingValue('')
+    setEditingToxina('')
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -158,6 +168,25 @@ export default function ToxinMarkerEditor({
     }
   }, [isDragging, selectedPonto, dragOffset, pontos])
 
+  // Forçar atualização da imagem quando imagemBase ou pacienteGenero mudarem
+  useEffect(() => {
+    if (imageRef.current) {
+      // Calcular URL da imagem base
+      let newUrl: string
+      if (imagemBase.startsWith('http') || imagemBase.startsWith('/')) {
+        newUrl = imagemBase
+      } else {
+        const baseImage = imagemBase === 'male' ? 'male' : 'female'
+        const genero = pacienteGenero?.toLowerCase() || baseImage
+        newUrl = genero === 'masculino' || genero === 'male' ? maleImage : femaleImage
+      }
+      // Forçar atualização usando key ou atualizando src diretamente
+      if (imageRef.current.src !== newUrl) {
+        imageRef.current.src = newUrl
+      }
+    }
+  }, [imagemBase, pacienteGenero])
+
   return (
     <div className="space-y-4" onKeyDown={handleKeyDown} tabIndex={0}>
       <div className="flex items-center justify-between">
@@ -177,6 +206,7 @@ export default function ToxinMarkerEditor({
           onMouseUp={handleDragEnd}
         >
           <img
+            key={`${imagemBase}-${pacienteGenero}`}
             ref={imageRef}
             src={getImageUrl()}
             alt="Rosto para marcação"
@@ -213,59 +243,94 @@ export default function ToxinMarkerEditor({
                   {index + 1}
                 </div>
 
-                {/* Valor ao passar o mouse */}
-                {ponto.valor > 0 && (
+                {/* Valor e toxina ao passar o mouse */}
+                {(ponto.valor > 0 || ponto.toxina) && (
                   <div
                     className={`absolute top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap pointer-events-none ${
                       isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     }`}
                   >
-                    {ponto.valor}U
+                    {ponto.toxina && <div className="font-semibold">{ponto.toxina}</div>}
+                    {ponto.valor > 0 && <div>{ponto.valor}U</div>}
                   </div>
                 )}
 
                 {/* Input inline de edição */}
                 {isEditing && (
                   <div
-                    className="absolute top-10 left-1/2 transform -translate-x-1/2 bg-white border-2 border-primary rounded-lg p-2 shadow-lg z-20"
+                    className="absolute top-10 left-1/2 transform -translate-x-1/2 bg-white border-2 border-primary rounded-lg p-3 shadow-lg z-20 min-w-[200px]"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={editingValue}
-                        onChange={(e) => setEditingValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleSaveValue(ponto.id)
-                          } else if (e.key === 'Escape') {
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Toxina</label>
+                        <input
+                          type="text"
+                          value={editingToxina}
+                          onChange={(e) => setEditingToxina(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handleSaveValue(ponto.id)
+                            } else if (e.key === 'Escape') {
+                              setEditingPonto(null)
+                              setEditingValue('')
+                              setEditingToxina('')
+                            }
+                          }}
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                          placeholder="Ex: Botox, Dysport..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Valor (U)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handleSaveValue(ponto.id)
+                            } else if (e.key === 'Escape') {
+                              setEditingPonto(null)
+                              setEditingValue('')
+                              setEditingToxina('')
+                            }
+                          }}
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                          placeholder="0"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={(e) => handleSaveValue(ponto.id, e)}
+                          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-primary text-white rounded text-xs hover:bg-opacity-90"
+                          title="Salvar"
+                        >
+                          <Save className="w-3 h-3" />
+                          Salvar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
                             setEditingPonto(null)
                             setEditingValue('')
-                          }
-                        }}
-                        className="w-20 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                        placeholder="Valor"
-                        autoFocus
-                      />
-                      <button
-                        onClick={() => handleSaveValue(ponto.id)}
-                        className="p-1 bg-primary text-white rounded hover:bg-opacity-90"
-                        title="Salvar"
-                      >
-                        <Save className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingPonto(null)
-                          setEditingValue('')
-                        }}
-                        className="p-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                        title="Cancelar"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                            setEditingToxina('')
+                          }}
+                          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300"
+                          title="Cancelar"
+                        >
+                          <X className="w-3 h-3" />
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -276,7 +341,7 @@ export default function ToxinMarkerEditor({
 
         <div className="mt-4 text-xs text-gray-600 space-y-1">
           <p>• Clique na imagem para adicionar um novo ponto</p>
-          <p>• Clique duplo em um ponto para editar o valor</p>
+          <p>• Clique duplo em um ponto para editar toxina e valor</p>
           <p>• Arraste um ponto para movê-lo</p>
           <p>• Selecione um ponto e pressione Delete para remover</p>
         </div>
@@ -299,6 +364,11 @@ export default function ToxinMarkerEditor({
                     {index + 1}
                   </div>
                   <div>
+                    {ponto.toxina && (
+                      <div className="text-sm font-semibold text-blue-700 mb-0.5">
+                        {ponto.toxina}
+                      </div>
+                    )}
                     <div className="text-sm font-medium text-gray-900">
                       Posição: ({ponto.x.toFixed(1)}%, {ponto.y.toFixed(1)}%)
                     </div>
@@ -309,17 +379,26 @@ export default function ToxinMarkerEditor({
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
                       setEditingPonto(ponto.id)
                       setEditingValue(ponto.valor.toString())
+                      setEditingToxina(ponto.toxina || '')
                     }}
                     className="p-1.5 text-gray-600 hover:text-primary hover:bg-primary/10 rounded transition"
-                    title="Editar valor"
+                    title="Editar toxina e valor"
                   >
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleDeletePonto(ponto.id)}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handleDeletePonto(ponto.id)
+                    }}
                     className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition"
                     title="Remover ponto"
                   >

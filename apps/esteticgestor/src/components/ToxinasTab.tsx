@@ -12,6 +12,7 @@ interface PontoMarcacao {
   x: number
   y: number
   valor: number
+  toxina?: string // Descrição da toxina aplicada neste ponto
   regiao?: string
   observacao?: string
 }
@@ -24,6 +25,7 @@ interface SessaoToxina {
   imagem_base: string
   pontos_marcacao: PontoMarcacao[]
   total_unidades: number
+  descricao_toxina?: string | null
   observacoes?: string | null
   created_at: string
   updated_at: string
@@ -44,6 +46,7 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
   const [saving, setSaving] = useState(false)
   const [formData, setFormData] = useState({
     data: format(new Date(), 'yyyy-MM-dd'),
+    descricao_toxina: '',
     imagem_base: paciente?.genero?.toLowerCase() === 'masculino' || paciente?.genero?.toLowerCase() === 'male' ? 'male' : 'female',
     pontos_marcacao: [] as PontoMarcacao[],
     observacoes: ''
@@ -75,6 +78,7 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
     setEditingSessao(null)
     setFormData({
       data: format(new Date(), 'yyyy-MM-dd'),
+      descricao_toxina: '',
       imagem_base: paciente?.genero?.toLowerCase() === 'masculino' || paciente?.genero?.toLowerCase() === 'male' ? 'male' : 'female',
       pontos_marcacao: [],
       observacoes: ''
@@ -87,6 +91,7 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
     setViewingSessao(null)
     setFormData({
       data: sessao.data,
+      descricao_toxina: sessao.descricao_toxina || '',
       imagem_base: sessao.imagem_base,
       pontos_marcacao: sessao.pontos_marcacao || [],
       observacoes: sessao.observacoes || ''
@@ -99,6 +104,7 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
     setEditingSessao(null)
     setFormData({
       data: sessao.data,
+      descricao_toxina: sessao.descricao_toxina || '',
       imagem_base: sessao.imagem_base,
       pontos_marcacao: sessao.pontos_marcacao || [],
       observacoes: sessao.observacoes || ''
@@ -119,6 +125,7 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
         imagem_base: formData.imagem_base,
         pontos_marcacao: formData.pontos_marcacao,
         total_unidades: totalUnidades,
+        descricao_toxina: formData.descricao_toxina || null,
         observacoes: formData.observacoes || null,
         updated_at: new Date().toISOString()
       }
@@ -263,6 +270,13 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
                     </span>
                   </div>
 
+                  {sessao.descricao_toxina && (
+                    <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                      <Syringe className="w-3 h-3" />
+                      {sessao.descricao_toxina}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-gray-600">
                       <span className="font-medium">{totalPontos}</span> {totalPontos === 1 ? 'ponto' : 'pontos'}
@@ -320,6 +334,15 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
       >
         {viewingSessao ? (
           <div className="space-y-4">
+            {formData.descricao_toxina && (
+              <div>
+                <h5 className="text-sm font-semibold text-gray-900 mb-2">Toxina Aplicada:</h5>
+                <div className="inline-flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-800 rounded-lg text-sm font-medium">
+                  <Syringe className="w-4 h-4" />
+                  {formData.descricao_toxina}
+                </div>
+              </div>
+            )}
             <ToxinMarkerEditor
               imagemBase={formData.imagem_base}
               pontos={formData.pontos_marcacao}
@@ -357,6 +380,20 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Descrição da Toxina</label>
+              <input
+                type="text"
+                value={formData.descricao_toxina}
+                onChange={(e) => setFormData(prev => ({ ...prev, descricao_toxina: e.target.value }))}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
+                placeholder="Ex: Botox, Dysport, Xeomin..."
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Opcional. Informe o tipo ou marca da toxina aplicada.
+              </p>
             </div>
 
             <div>

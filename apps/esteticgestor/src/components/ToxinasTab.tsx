@@ -400,7 +400,14 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
               <label className="block text-sm font-medium text-gray-700 mb-2">Imagem Base</label>
               <select
                 value={formData.imagem_base}
-                onChange={(e) => setFormData(prev => ({ ...prev, imagem_base: e.target.value }))}
+                onChange={(e) => {
+                  const newValue = e.target.value
+                  console.log('[ToxinasTab] Mudando imagem_base:', { 
+                    de: formData.imagem_base, 
+                    para: newValue 
+                  })
+                  setFormData(prev => ({ ...prev, imagem_base: newValue }))
+                }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition"
               >
                 <option value="female">Feminino</option>
@@ -412,6 +419,10 @@ export default function ToxinasTab({ pacienteId, paciente }: ToxinasTabProps) {
             </div>
 
             <div>
+              {console.log('[ToxinasTab] Renderizando ToxinMarkerEditor com:', { 
+                imagemBase: formData.imagem_base, 
+                pacienteGenero: paciente?.genero 
+              })}
               <ToxinMarkerEditor
                 imagemBase={formData.imagem_base}
                 pontos={formData.pontos_marcacao}

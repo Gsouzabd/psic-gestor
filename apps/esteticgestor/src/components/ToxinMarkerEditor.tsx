@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { X, Plus, Trash2, Edit2, Save } from 'lucide-react'
 import femaleImage from '../images/faciais/female.png'
 import maleImage from '../images/faciais/male.png'
@@ -35,17 +35,25 @@ export default function ToxinMarkerEditor({
   const containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
 
-  // Determinar URL da imagem base
-  const getImageUrl = () => {
+  // Calcular URL da imagem base usando useMemo para garantir atualização
+  const imageUrl = useMemo(() => {
+    console.log('[ToxinMarkerEditor] useMemo recalculando:', { imagemBase, pacienteGenero })
+    
+    let result: string
     if (imagemBase.startsWith('http') || imagemBase.startsWith('/')) {
-      return imagemBase
+      // URL customizada
+      result = imagemBase
+    } else if (imagemBase === 'male') {
+      // Priorizar imagemBase quando especificado explicitamente
+      result = maleImage
+    } else {
+      // Default para female
+      result = femaleImage
     }
-    // Default para female se não especificado
-    const baseImage = imagemBase === 'male' ? 'male' : 'female'
-    // Se não tem genero definido, usar imagem base informada
-    const genero = pacienteGenero?.toLowerCase() || baseImage
-    return genero === 'masculino' || genero === 'male' ? maleImage : femaleImage
-  }
+    
+    console.log('[ToxinMarkerEditor] URL calculada:', result)
+    return result
+  }, [imagemBase, pacienteGenero])
 
   const calculateTotal = () => {
     return pontos.reduce((sum, p) => sum + (p.valor || 0), 0)
@@ -168,24 +176,6 @@ export default function ToxinMarkerEditor({
     }
   }, [isDragging, selectedPonto, dragOffset, pontos])
 
-  // Forçar atualização da imagem quando imagemBase ou pacienteGenero mudarem
-  useEffect(() => {
-    if (imageRef.current) {
-      // Calcular URL da imagem base
-      let newUrl: string
-      if (imagemBase.startsWith('http') || imagemBase.startsWith('/')) {
-        newUrl = imagemBase
-      } else {
-        const baseImage = imagemBase === 'male' ? 'male' : 'female'
-        const genero = pacienteGenero?.toLowerCase() || baseImage
-        newUrl = genero === 'masculino' || genero === 'male' ? maleImage : femaleImage
-      }
-      // Forçar atualização usando key ou atualizando src diretamente
-      if (imageRef.current.src !== newUrl) {
-        imageRef.current.src = newUrl
-      }
-    }
-  }, [imagemBase, pacienteGenero])
 
   return (
     <div className="space-y-4" onKeyDown={handleKeyDown} tabIndex={0}>
@@ -208,10 +198,12 @@ export default function ToxinMarkerEditor({
           <img
             key={`${imagemBase}-${pacienteGenero}`}
             ref={imageRef}
-            src={getImageUrl()}
+            src={imageUrl}
             alt="Rosto para marcação"
             className="w-full h-full object-contain"
             draggable={false}
+            onLoad={() => console.log('[ToxinMarkerEditor] Imagem carregada:', imageUrl)}
+            onError={() => console.error('[ToxinMarkerEditor] Erro ao carregar imagem:', imageUrl)}
           />
 
           {/* Pontos de marcação */}
